@@ -270,15 +270,9 @@ export default function NexusFolio() {
 
       const meanReturn = dailyReturns.reduce((a,b) => a+b, 0) / (dailyReturns.length || 1);
       const variance = dailyReturns.reduce((a,b) => a + Math.pow(b - meanReturn, 2), 0) / (dailyReturns.length || 1);
-      const volatility = Math.sqrt(variance) * Math.sqrt(252) * 100; // Annualized Volatility
+      const volatility = Math.sqrt(variance) * Math.sqrt(252) * 100; 
 
-      const daysDiff = (rawDailyData[rawDailyData.length-1].date - rawDailyData[0].date) / (1000 * 60 * 60 * 24);
-      let cagr = perc; 
-      if (daysDiff > 30) {
-        cagr = (Math.pow(endPrice / startPrice, 365 / daysDiff) - 1) * 100;
-      }
-
-      stats = { startPrice, endPrice, perc, maxDrawdown: maxDrawdown * 100, bestDay, worstDay, volatility, cagr };
+      stats = { startPrice, endPrice, perc, maxDrawdown: maxDrawdown * 100, bestDay, worstDay, volatility };
     }
 
     // --- Calculate Individual Ticker Performance ---
@@ -375,7 +369,6 @@ export default function NexusFolio() {
     yaxis: { labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } }, tooltip: { enabled: true } },
     grid: { borderColor: '#27272a', strokeDashArray: 4, xaxis: { lines: { show: true } }, yaxis: { lines: { show: true } } },
     stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
-    // Swapped primary color to Cyan
     colors: ['#22d3ee', '#818cf8', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'], 
     tooltip: { 
       theme: 'dark', 
@@ -471,7 +464,6 @@ export default function NexusFolio() {
                             className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-cyan-500 outline-none"
                           />
                         </div>
-                        {/* Changed slider accent color to cyan-400 */}
                         <input 
                           type="range" min="0" max="100" value={item.weight} 
                           onChange={(e) => updateWeight(idx, Number(e.target.value))}
@@ -493,7 +485,7 @@ export default function NexusFolio() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Terminal */}
+        {/* RIGHT COLUMN: Terminal Container */}
         <div className="w-full xl:w-3/4 flex flex-col gap-6">
           
           <div className="bg-zinc-900/40 border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg shrink-0">
@@ -557,7 +549,7 @@ export default function NexusFolio() {
             </div>
           )}
 
-          {/* MAIN CHART & STATS DASHBOARD */}
+          {/* MAIN DASHBOARD LAYOUT: Chart on Left, ALL Stats on Right */}
           <div className="flex flex-col lg:flex-row gap-6">
             
             {/* Chart Area */}
@@ -595,83 +587,83 @@ export default function NexusFolio() {
               )}
             </div>
 
-            {/* Performance Stats Panel */}
+            {/* RIGHT COLUMN STATS & TOP/BOTTOM PANELS */}
             {portfolioStats && (
-              <div className="w-full lg:w-72 bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-xl flex flex-col gap-6 shrink-0">
-                <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Fund Performance Stats</h3>
-                <div className="flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-500">Avg Yearly Return</span>
-                    <span className="text-sm font-medium text-zinc-200">{portfolioStats.cagr.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-500">Volatility (Ann.)</span>
-                    <span className="text-sm font-medium text-zinc-200">±{portfolioStats.volatility.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-500">Max Drawdown</span>
-                    <span className="text-sm font-medium text-rose-400">-{portfolioStats.maxDrawdown.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-500">Best Day</span>
-                    <span className="text-sm font-medium text-emerald-400">+{portfolioStats.bestDay.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-500">Worst Day</span>
-                    <span className="text-sm font-medium text-rose-400">{portfolioStats.worstDay.toFixed(2)}%</span>
+              <div className="w-full lg:w-[340px] flex flex-col gap-6 shrink-0">
+                
+                {/* 1. Portfolio Stats Table */}
+                <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
+                  <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Portfolio Stats</h3>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-500">Return (Timeframe)</span>
+                      <span className={`text-sm font-medium ${portfolioStats.perc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {portfolioStats.perc >= 0 ? '+' : ''}{portfolioStats.perc.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-500">Volatility (Ann.)</span>
+                      <span className="text-sm font-medium text-zinc-200">±{portfolioStats.volatility.toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-500">Max Drawdown</span>
+                      <span className="text-sm font-medium text-rose-400">-{portfolioStats.maxDrawdown.toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-500">Best Day</span>
+                      <span className="text-sm font-medium text-emerald-400">+{portfolioStats.bestDay.toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-500">Worst Day</span>
+                      <span className="text-sm font-medium text-rose-400">{portfolioStats.worstDay.toFixed(2)}%</span>
+                    </div>
                   </div>
                 </div>
+
+                {/* 2. Top Performers */}
+                {individualPerformance.length > 0 && (
+                  <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
+                    <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Top Performers</h3>
+                    <div className="flex flex-col gap-3">
+                      {individualPerformance.slice(0, 5).map(t => (
+                        <div key={t.ticker} className="flex items-center justify-between text-sm">
+                          <span className="font-bold text-zinc-200">{t.ticker}</span>
+                          <span className="text-zinc-500 text-xs hidden sm:block">${t.endPrice.toFixed(2)}</span>
+                          <span className={`font-medium text-right ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Underperformers */}
+                {individualPerformance.length > 0 && (
+                  <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
+                    <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Underperformers</h3>
+                    <div className="flex flex-col gap-3">
+                      {[...individualPerformance].reverse().slice(0, 5).map(t => (
+                        <div key={t.ticker} className="flex items-center justify-between text-sm">
+                          <span className="font-bold text-zinc-200">{t.ticker}</span>
+                          <span className="text-zinc-500 text-xs hidden sm:block">${t.endPrice.toFixed(2)}</span>
+                          <span className={`font-medium text-right ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
           </div>
 
-          {/* TOP / BOTTOM PERFORMERS TABLES */}
-          {individualPerformance.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-lg">
-                <h3 className="text-sm font-semibold text-zinc-300 mb-4 flex justify-between">
-                  <span>Top Performers</span>
-                  <span className="text-zinc-600 text-xs font-normal">Selected Timeframe</span>
-                </h3>
-                <div className="flex flex-col gap-3">
-                  {individualPerformance.slice(0, 5).map(t => (
-                    <div key={t.ticker} className="flex items-center justify-between text-sm border-b border-zinc-800/50 pb-2 last:border-0">
-                      <span className="font-bold text-zinc-200 w-16">{t.ticker}</span>
-                      <span className="text-zinc-500 text-xs hidden sm:block w-20">${t.startPrice.toFixed(2)}</span>
-                      <span className="text-zinc-300 w-20 text-right">${t.endPrice.toFixed(2)}</span>
-                      <span className={`w-20 text-right font-medium ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-lg">
-                <h3 className="text-sm font-semibold text-zinc-300 mb-4 flex justify-between">
-                  <span>Underperformers</span>
-                  <span className="text-zinc-600 text-xs font-normal">Selected Timeframe</span>
-                </h3>
-                <div className="flex flex-col gap-3">
-                  {/* Reversing the array to show worst performers first */}
-                  {[...individualPerformance].reverse().slice(0, 5).map(t => (
-                    <div key={t.ticker} className="flex items-center justify-between text-sm border-b border-zinc-800/50 pb-2 last:border-0">
-                      <span className="font-bold text-zinc-200 w-16">{t.ticker}</span>
-                      <span className="text-zinc-500 text-xs hidden sm:block w-20">${t.startPrice.toFixed(2)}</span>
-                      <span className="text-zinc-300 w-20 text-right">${t.endPrice.toFixed(2)}</span>
-                      <span className={`w-20 text-right font-medium ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* CORRELATION ENGINE PANEL */}
           {portfolio.length > 0 && (
-            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0">
+            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
+               <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col">
                     <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
