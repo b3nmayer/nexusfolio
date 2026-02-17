@@ -7,10 +7,9 @@ import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Ca
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
-// The fixed universe of benchmark ETFs we always correlate against
 const BASE_BENCHMARKS = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
 
-export default function PortfolioAnalyzer() {
+export default function NexusFolio() {
   const [portfolio, setPortfolio] = useState<{ ticker: string, weight: number }[]>([]);
   const [stockData, setStockData] = useState<Record<string, any[]>>({});
   const [compareTickers, setCompareTickers] = useState<string[]>([]);
@@ -18,6 +17,7 @@ export default function PortfolioAnalyzer() {
   const [newPortfolioTicker, setNewPortfolioTicker] = useState("");
   const [chartType, setChartType] = useState<'candlestick' | 'line'>('line');
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   
   // Main Chart Timeframes
   const [timeframe, setTimeframe] = useState<number | 'YTD' | 'CUSTOM'>(90);
@@ -34,7 +34,40 @@ export default function PortfolioAnalyzer() {
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
   const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
 
-  // --- NEW: Reset Function ---
+  // --- BROWSER AUTO-SAVE (LOCAL STORAGE) ---
+  useEffect(() => {
+    const savedPortfolio = localStorage.getItem('nexusFolio_portfolio');
+    if (savedPortfolio) {
+      try {
+        const parsed = JSON.parse(savedPortfolio);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPortfolio(parsed);
+        }
+      } catch (e) { console.error("Failed to parse saved portfolio."); }
+    }
+    setHasLoadedStorage(true);
+  }, []);
+
+  useEffect(() => {
+    if (hasLoadedStorage) {
+      if (portfolio.length > 0) {
+        localStorage.setItem('nexusFolio_portfolio', JSON.stringify(portfolio));
+      } else {
+        localStorage.removeItem('nexusFolio_portfolio');
+      }
+    }
+  }, [portfolio, hasLoadedStorage]);
+
+  // Load data for auto-saved tickers on initial load
+  useEffect(() => {
+    if (hasLoadedStorage && portfolio.length > 0 && Object.keys(stockData).length === 0) {
+      const tickers = portfolio.map(p => p.ticker);
+      fetchDataForTickers(tickers, 1825);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLoadedStorage, portfolio.length]);
+
+  // --- RESET UI ---
   const handleReset = () => {
     setPortfolio([]);
     setStockData({});
@@ -45,6 +78,7 @@ export default function PortfolioAnalyzer() {
     setTimeframe(90);
     setCorrTimeframe(90);
     setShowSMA({ 20: false, 50: false, 200: false });
+    localStorage.removeItem('nexusFolio_portfolio');
   };
 
   // Sequential Data Fetcher
@@ -300,7 +334,6 @@ export default function PortfolioAnalyzer() {
 
   useEffect(() => { setTopCorrelations([]); }, [corrTimeframe, portfolio]);
 
-  // Dynamically calculate which benchmarks are not in the portfolio for the info text
   const externalBenchmarks = useMemo(() => {
     return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
   }, [portfolio]);
@@ -312,7 +345,7 @@ export default function PortfolioAnalyzer() {
     yaxis: { labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } }, tooltip: { enabled: true } },
     grid: { borderColor: '#27272a', strokeDashArray: 4, xaxis: { lines: { show: true } }, yaxis: { lines: { show: true } } },
     stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
-    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'],
+    colors: ['#818cf8', '#22d3ee', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'], // Indigo/Cyan Base Palette
     tooltip: { 
       theme: 'dark', 
       shared: true, 
@@ -336,19 +369,22 @@ export default function PortfolioAnalyzer() {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-sky-500/30 p-4 md:p-8 flex flex-col gap-8 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(56,189,248,0.1),rgba(255,255,255,0))]">
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-indigo-500/30 p-4 md:p-8 flex flex-col gap-8 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(99,102,241,0.15),rgba(255,255,255,0))]">
       
       <header className="flex items-center justify-between px-2">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-sky-500/10 border border-sky-500/20 rounded-xl">
-            <Activity className="text-sky-400 w-6 h-6" />
+          <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-cyan-400">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-zinc-100 to-zinc-500">
-            FolioAnalyzer
+          <h1 className="text-2xl font-bold tracking-tighter text-white">
+            Nexus<span className="text-zinc-500 font-medium">Folio</span>
           </h1>
         </div>
         
-        {/* NEW RESET BUTTON */}
         {portfolio.length > 0 && (
           <button 
             onClick={handleReset}
@@ -365,12 +401,12 @@ export default function PortfolioAnalyzer() {
         <div className="w-full xl:w-1/3 flex flex-col min-h-[500px]">
           <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-6 flex-1 h-full">
             <h2 className="text-lg font-medium text-zinc-200 flex items-center gap-2 shrink-0">
-              <PieChart className="w-5 h-5 text-sky-400" /> Allocation Setup
+              <PieChart className="w-5 h-5 text-cyan-400" /> Allocation Setup
             </h2>
             
             <div className="flex flex-col gap-3 shrink-0">
-              <label className="group relative flex flex-col items-center justify-center w-full p-4 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-sky-500/50 transition-all">
-                <Upload className="w-5 h-5 mb-2 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+              <label className="group relative flex flex-col items-center justify-center w-full p-4 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-indigo-500/50 transition-all">
+                <Upload className="w-5 h-5 mb-2 text-zinc-400 group-hover:text-cyan-400 transition-colors" />
                 <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
                 <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
               </label>
@@ -380,9 +416,9 @@ export default function PortfolioAnalyzer() {
                   type="text" placeholder="Add manual (e.g. TSLA)" value={newPortfolioTicker}
                   onChange={(e) => setNewPortfolioTicker(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addManualTicker()}
-                  className="flex-1 bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 py-2 text-xs text-zinc-200 focus:ring-1 focus:ring-sky-500/50 uppercase"
+                  className="flex-1 bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 py-2 text-xs text-zinc-200 focus:ring-1 focus:ring-indigo-500/50 uppercase"
                 />
-                <button onClick={addManualTicker} disabled={isLoading || !newPortfolioTicker} className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/20 transition-all disabled:opacity-50 shrink-0">
+                <button onClick={addManualTicker} disabled={isLoading || !newPortfolioTicker} className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-cyan-400 rounded-xl border border-indigo-500/20 transition-all disabled:opacity-50 shrink-0">
                   <Plus size={16} />
                 </button>
               </div>
@@ -402,13 +438,13 @@ export default function PortfolioAnalyzer() {
                           <input 
                             type="number" value={item.weight.toFixed(1)} 
                             onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                            className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-sky-500 outline-none"
+                            className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-indigo-500 outline-none"
                           />
                         </div>
                         <input 
                           type="range" min="0" max="100" value={item.weight} 
                           onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                          className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                          className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                         />
                       </div>
                     ))}
@@ -436,7 +472,7 @@ export default function PortfolioAnalyzer() {
                 {[ {label: '1M', val: 30}, {label: '3M', val: 90}, {label: '6M', val: 180}, {label: 'YTD', val: 'YTD'}, {label: '1Y', val: 365}, {label: 'Custom', val: 'CUSTOM'} ].map(tf => (
                   <button 
                     key={tf.label} onClick={() => setTimeframe(tf.val as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${timeframe === tf.val ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${timeframe === tf.val ? 'bg-zinc-800 text-cyan-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
                   >
                     {tf.label}
                   </button>
@@ -448,7 +484,7 @@ export default function PortfolioAnalyzer() {
                    <button
                       key={days}
                       onClick={() => setShowSMA(prev => ({...prev, [days]: !prev[days as keyof typeof prev]}))}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1 ${showSMA[days as keyof typeof showSMA] ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1 ${showSMA[days as keyof typeof showSMA] ? 'bg-zinc-800 text-cyan-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
                    >
                       <ActivitySquare size={12} /> SMA {days}
                    </button>
@@ -471,9 +507,9 @@ export default function PortfolioAnalyzer() {
                   type="text" placeholder="Compare (e.g. SPY)" value={newCompareTicker}
                   onChange={(e) => setNewCompareTicker(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addCompareTicker()}
-                  className="bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 pr-8 py-1.5 w-36 text-xs text-zinc-200 focus:ring-1 focus:ring-sky-500/50 uppercase"
+                  className="bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 pr-8 py-1.5 w-36 text-xs text-zinc-200 focus:ring-1 focus:ring-indigo-500/50 uppercase"
                 />
-                <button onClick={addCompareTicker} disabled={isLoading} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-sky-400 transition-colors disabled:opacity-50">
+                <button onClick={addCompareTicker} disabled={isLoading} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-cyan-400 transition-colors disabled:opacity-50">
                   <Plus size={16} />
                 </button>
               </div>
@@ -507,7 +543,7 @@ export default function PortfolioAnalyzer() {
 
             {isLoading && (
               <div className="absolute inset-0 z-10 flex items-center justify-center flex-col gap-4 bg-zinc-950/40 backdrop-blur-sm">
-                <Loader2 className="animate-spin text-sky-400" size={36} />
+                <Loader2 className="animate-spin text-cyan-400" size={36} />
                 <p className="text-zinc-400 font-medium text-sm">Syncing Data...</p>
               </div>
             )}
@@ -515,7 +551,7 @@ export default function PortfolioAnalyzer() {
             {portfolio.length === 0 ? (
               <div className="h-full flex items-center justify-center flex-col gap-4 text-zinc-600">
                 <Activity size={32} className="text-zinc-500 opacity-50" />
-                <p className="text-sm">Add a ticker to initialize terminal.</p>
+                <p className="text-sm">Add a ticker to initialize NexusFolio.</p>
               </div>
             ) : (
               <div className="h-full w-full p-4 pt-20">
@@ -529,11 +565,11 @@ export default function PortfolioAnalyzer() {
           {/* CORRELATION ENGINE PANEL */}
           {portfolio.length > 0 && (
             <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-4 relative overflow-hidden shrink-0">
-               <div className="absolute right-0 top-0 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
+               <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col">
                     <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
-                      <Network className="w-5 h-5 text-sky-400" /> Correlation Engine
+                      <Network className="w-5 h-5 text-cyan-400" /> Correlation Engine
                     </h3>
                     <p className="text-xs text-zinc-500 mt-1">Calculates portfolio correlation against its holdings and key ETFs.</p>
                   </div>
@@ -542,7 +578,7 @@ export default function PortfolioAnalyzer() {
                     <select 
                       value={corrTimeframe} 
                       onChange={(e) => setCorrTimeframe(e.target.value === 'YTD' ? 'YTD' : Number(e.target.value))}
-                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-sky-500/50 appearance-none cursor-pointer"
+                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 appearance-none cursor-pointer"
                     >
                       <option value={7}>Last 1 Week</option>
                       <option value={30}>Last 1 Month</option>
@@ -556,9 +592,9 @@ export default function PortfolioAnalyzer() {
                     <button 
                       onClick={fetchCorrelations} 
                       disabled={isCalculatingCorr}
-                      className="flex items-center gap-2 px-4 py-2 bg-sky-500 text-zinc-950 font-semibold rounded-xl hover:bg-sky-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(56,189,248,0.3)] min-w-[140px] justify-center"
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-zinc-950 font-semibold rounded-xl hover:bg-indigo-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(99,102,241,0.3)] min-w-[140px] justify-center"
                     >
-                      {isCalculatingCorr ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                      {isCalculatingCorr ? <Loader2 size={16} className="animate-spin text-zinc-950" /> : <Search size={16} className="text-zinc-950" />}
                       {isCalculatingCorr ? "Scanning..." : "Scan Market"}
                     </button>
                   </div>
@@ -568,14 +604,13 @@ export default function PortfolioAnalyzer() {
                  <>
                    <div className="flex flex-wrap gap-3 mt-2">
                       {topCorrelations.map((c, i) => (
-                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1 hover:border-sky-500/30 transition-colors">
+                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1 hover:border-indigo-500/30 transition-colors">
                           <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
-                          <span className="text-sky-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
+                          <span className="text-cyan-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
                         </div>
                       ))}
                    </div>
                    
-                   {/* NEW: External Benchmarks Info Footer */}
                    {externalBenchmarks.length > 0 && (
                      <div className="mt-2 text-xs text-zinc-500/80 flex items-center gap-1.5 border-t border-zinc-800/50 pt-3">
                        <Info size={14} className="text-zinc-400 shrink-0" />
