@@ -11,21 +11,24 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Calculate the start date based on the requested timeframe
-    const period1 = new Date();
-    period1.setDate(period1.getDate() - days);
+    console.log(`[API] Attempting to fetch data for: ${ticker}`);
     
-    // Fetch historical daily data from Yahoo Finance 
-    // We cast to `any[]` here to satisfy strict TypeScript checks during Vercel builds
+    // Safely format the date as a string (YYYY-MM-DD) instead of a raw Date object
+    const period1Date = new Date();
+    period1Date.setDate(period1Date.getDate() - days);
+    const period1String = period1Date.toISOString().split('T')[0]; 
+
     const result = (await yahooFinance.historical(ticker, {
-      period1: period1,
+      period1: period1String,
       interval: '1d',
     })) as any[];
 
-    // Format data specifically for ApexCharts: { x: timestamp, y: [O, H, L, C] }
-    // We also explicitly type `quote` as `any`
+    if (!result || result.length === 0) {
+      throw new Error("Yahoo Finance returned an empty dataset.");
+    }
+
     const formattedData = result.map((quote: any) => ({
-      x: quote.date.getTime(),
+      x: new Date(quote.date).getTime(),
       y: [
         Number(quote.open.toFixed(2)),
         Number(quote.high.toFixed(2)),
@@ -34,9 +37,12 @@ export async function GET(request: Request) {
       ],
     }));
 
+    console.log(`[API] Successfully fetched ${formattedData.length} days of data for ${ticker}`);
     return NextResponse.json({ ticker, data: formattedData });
-  } catch (error) {
-    console.error(`Failed to fetch data for ${ticker}:`, error);
-    return NextResponse.json({ error: 'Failed to fetch stock data or invalid ticker.' }, { status: 500 });
+    
+  } catch (error: any) {
+    // This will print the EXACT reason Yahoo failed into your Vercel logs
+    console.error(`[API ERROR] Failed for ${ticker}:`, error.message || error);
+    return NextResponse.json({ error: error.message || 'Failed to fetch stock data.' }, { status: 500 });
   }
 }
