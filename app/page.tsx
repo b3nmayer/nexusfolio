@@ -16,7 +16,7 @@ export default function PortfolioAnalyzer() {
   const [chartType, setChartType] = useState<'candlestick' | 'line'>('line');
   const [isLoading, setIsLoading] = useState(false);
   
-  // Timeframes & Custom Calendars
+  // Main Chart Timeframes
   const [timeframe, setTimeframe] = useState<number | 'YTD' | 'CUSTOM'>(90);
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0];
@@ -26,33 +26,28 @@ export default function PortfolioAnalyzer() {
   // Correlation Engine
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
+  const [corrTimeframe, setCorrTimeframe] = useState<number>(90); // Independent Correlation Timeframe
 
- // Sequential Data Fetcher (with Anti-Spam Delay)
-  const fetchDataForTickers = async (tickers: string[], days: number = 512) => {
+  // Sequential Data Fetcher
+  const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
     setIsLoading(true);
     const newData: Record<string, any[]> = { ...stockData };
     try {
       for (const ticker of tickers) {
         if (!newData[ticker]) {
           const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
-          
           if (!res.ok) {
             const errorData = await res.json().catch(() => ({}));
-            // If the server didn't give a specific error, it will show the HTTP status code
-            throw new Error(`${errorData.error || `HTTP ${res.status} Server Crash`}`);
+            throw new Error(`Rejected ticker '${ticker}': ${errorData.error || 'Server error'}`);
           }
-          
           const json = await res.json();
           newData[ticker] = json.data;
-
-          // PAUSE FOR 300ms BEFORE THE NEXT FETCH TO PREVENT RATE LIMITING
-          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
       setStockData(newData);
     } catch (error: any) {
       console.error(error);
-      alert(`Data Sync Error (Ticker rejected): ${error.message}`);
+      alert(`Data Sync Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -195,24 +190,57 @@ export default function PortfolioAnalyzer() {
     return { startPrice, endPrice, diff, perc };
   }, [chartSeries, chartType]);
 
-  // NEW CORRELATION LOGIC
+  // INDEPENDENT CORRELATION LOGIC
   const fetchCorrelations = async () => {
-    if(aggregateRawData.length < 5) return;
+    if(portfolio.length === 0) return;
+    
+    // 1. Generate a custom dataset based specifically on the 'corrTimeframe' dropdown
+    const corrStartTime = new Date();
+    corrStartTime.setDate(corrStartTime.getDate() - corrTimeframe);
+    const corrStartMs = corrStartTime.getTime();
+
+    const corrData = [];
+    const baseTicker = portfolio[0].ticker;
+    const baseData = stockData[baseTicker] || [];
+
+    for (let i = 0; i < baseData.length; i++) {
+      if (baseData[i].x < corrStartMs) continue;
+
+      let aggClose = 0;
+      let totalWeight = 0;
+
+      portfolio.forEach(({ ticker, weight }) => {
+        const sData = stockData[ticker]?.find(d => d.x === baseData[i].x);
+        if (sData) {
+          const w = weight / 100;
+          aggClose += sData.y[3] * w;
+          totalWeight += w;
+        }
+      });
+
+      if (totalWeight > 0) {
+        corrData.push({ date: baseData[i].x, price: parseFloat(aggClose.toFixed(2)) });
+      }
+    }
+
+    if(corrData.length < 5) {
+      alert("Not enough data points in this timeframe to calculate a valid correlation.");
+      return;
+    }
+
     setIsCalculatingCorr(true);
     setTopCorrelations([]);
     
-    // Combine current portfolio holdings + benchmark ETFs
     const baseBenchmarks = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
     const portfolioTickers = portfolio.map(p => p.ticker);
     const targetTickers = Array.from(new Set([...portfolioTickers, ...baseBenchmarks]));
 
     try {
-      // POINTING TO THE COMBINED STOCK API FILE
       const res = await fetch('/api/stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          portfolioData: aggregateRawData,
+          portfolioData: corrData,
           targetTickers: targetTickers 
         })
       });
@@ -220,12 +248,13 @@ export default function PortfolioAnalyzer() {
       if(data.topCorrelations) setTopCorrelations(data.topCorrelations);
     } catch (err) {
       console.error(err);
+      alert("Failed to calculate correlation.");
     } finally {
       setIsCalculatingCorr(false);
     }
   };
 
-  useEffect(() => { setTopCorrelations([]); }, [timeframe, customStart, customEnd, portfolio]);
+  useEffect(() => { setTopCorrelations([]); }, [corrTimeframe, portfolio]);
 
   const chartOptions: any = {
     theme: { mode: 'dark' },
@@ -253,16 +282,17 @@ export default function PortfolioAnalyzer() {
         </div>
       </header>
 
-      <div className="flex flex-col xl:flex-row gap-6">
+      {/* Main Flex Layout ensures both columns stretch */}
+      <div className="flex flex-col xl:flex-row gap-6 flex-1 items-stretch">
         
-        {/* LEFT COLUMN */}
-        <div className="w-full xl:w-1/3 flex flex-col gap-6">
-          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-6">
-            <h2 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+        {/* LEFT COLUMN: Uses flex-col and flex-1 to stretch full height */}
+        <div className="w-full xl:w-1/3 flex flex-col min-h-[500px]">
+          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-6 flex-1 h-full">
+            <h2 className="text-lg font-medium text-zinc-200 flex items-center gap-2 shrink-0">
               <PieChart className="w-5 h-5 text-sky-400" /> Allocation Setup
             </h2>
             
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 shrink-0">
               <label className="group relative flex flex-col items-center justify-center w-full p-4 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-sky-500/50 transition-all">
                 <Upload className="w-5 h-5 mb-2 text-zinc-400 group-hover:text-sky-400 transition-colors" />
                 <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
@@ -276,37 +306,48 @@ export default function PortfolioAnalyzer() {
                   onKeyDown={(e) => e.key === 'Enter' && addManualTicker()}
                   className="flex-1 bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 py-2 text-xs text-zinc-200 focus:ring-1 focus:ring-sky-500/50 uppercase"
                 />
-                <button onClick={addManualTicker} disabled={isLoading || !newPortfolioTicker} className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/20 transition-all disabled:opacity-50">
+                <button onClick={addManualTicker} disabled={isLoading || !newPortfolioTicker} className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/20 transition-all disabled:opacity-50 shrink-0">
                   <Plus size={16} />
                 </button>
               </div>
             </div>
 
+            {/* List scrolls dynamically, leaves room for total at the bottom */}
             {portfolio.length > 0 && (
-              <div className="overflow-y-auto max-h-[300px] border-t border-zinc-800/50 pt-4 mt-2">
-                <div className="space-y-5">
-                  {portfolio.map((item, idx) => (
-                    <div key={item.ticker} className="flex flex-col gap-2 group">
-                      <div className="flex justify-between items-center text-sm">
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => removePortfolioTicker(idx)} className="text-zinc-600 hover:text-rose-400 transition-colors"><X size={14} /></button>
-                          <span className="font-semibold text-zinc-300">{item.ticker}</span>
+              <>
+                <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar border-t border-zinc-800/50 pt-4 mt-2 pr-2">
+                  <div className="space-y-5">
+                    {portfolio.map((item, idx) => (
+                      <div key={item.ticker} className="flex flex-col gap-2 group">
+                        <div className="flex justify-between items-center text-sm">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => removePortfolioTicker(idx)} className="text-zinc-600 hover:text-rose-400 transition-colors"><X size={14} /></button>
+                            <span className="font-semibold text-zinc-300">{item.ticker}</span>
+                          </div>
+                          <input 
+                            type="number" value={item.weight.toFixed(1)} 
+                            onChange={(e) => updateWeight(idx, Number(e.target.value))}
+                            className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-sky-500 outline-none"
+                          />
                         </div>
                         <input 
-                          type="number" value={item.weight.toFixed(1)} 
+                          type="range" min="0" max="100" value={item.weight} 
                           onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                          className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-sky-500 outline-none"
+                          className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
                         />
                       </div>
-                      <input 
-                        type="range" min="0" max="100" value={item.weight} 
-                        onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                        className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
-                      />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+
+                {/* Restored Total Allocation Math (Sticks to bottom) */}
+                <div className="pt-4 border-t border-zinc-800/50 flex justify-between items-center mt-auto shrink-0">
+                  <span className="text-sm text-zinc-500">Total Allocation</span>
+                  <span className={`text-sm font-mono font-bold ${portfolio.reduce((s, i) => s + i.weight, 0) === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {portfolio.reduce((sum, item) => sum + item.weight, 0).toFixed(1)}%
+                  </span>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -314,7 +355,7 @@ export default function PortfolioAnalyzer() {
         {/* RIGHT COLUMN */}
         <div className="w-full xl:w-2/3 flex flex-col gap-6">
           
-          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg">
+          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg shrink-0">
             
             <div className="flex gap-1 items-center">
               <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl mr-2">
@@ -354,7 +395,7 @@ export default function PortfolioAnalyzer() {
           </div>
 
           {compareTickers.length > 0 && (
-            <div className="flex gap-2 flex-wrap px-1">
+            <div className="flex gap-2 flex-wrap px-1 shrink-0">
               {compareTickers.map(ticker => (
                 <span key={ticker} className="flex items-center gap-1.5 px-3 py-1 bg-zinc-800/50 border border-zinc-700/50 rounded-full text-xs font-medium text-zinc-300">
                   {ticker}
@@ -401,23 +442,39 @@ export default function PortfolioAnalyzer() {
 
           {/* CORRELATION ENGINE PANEL */}
           {portfolio.length > 0 && (
-            <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-4 relative overflow-hidden">
+            <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-4 relative overflow-hidden shrink-0">
                <div className="absolute right-0 top-0 w-64 h-64 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
-               <div className="flex items-center justify-between">
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col">
                     <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
                       <Network className="w-5 h-5 text-sky-400" /> Correlation Engine
                     </h3>
-                    <p className="text-xs text-zinc-500 mt-1">Calculates portfolio correlation against its holdings and key ETFs (QQQ, SPY, IWM, etc.).</p>
+                    <p className="text-xs text-zinc-500 mt-1">Calculates portfolio correlation against its holdings and key ETFs.</p>
                   </div>
-                  <button 
-                    onClick={fetchCorrelations} 
-                    disabled={isCalculatingCorr || aggregateRawData.length < 5}
-                    className="flex items-center gap-2 px-4 py-2 bg-sky-500 text-zinc-950 font-semibold rounded-xl hover:bg-sky-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(56,189,248,0.3)] min-w-[140px] justify-center"
-                  >
-                    {isCalculatingCorr ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-                    {isCalculatingCorr ? "Scanning..." : "Scan Market"}
-                  </button>
+                  
+                  <div className="flex items-center gap-3">
+                    {/* NEW INDEPENDENT DROPDOWN */}
+                    <select 
+                      value={corrTimeframe} 
+                      onChange={(e) => setCorrTimeframe(Number(e.target.value))}
+                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-sky-500/50 appearance-none cursor-pointer"
+                    >
+                      <option value={30}>Last 1 Month</option>
+                      <option value={90}>Last 3 Months</option>
+                      <option value={180}>Last 6 Months</option>
+                      <option value={365}>Last 1 Year</option>
+                      <option value={1095}>Last 3 Years</option>
+                    </select>
+
+                    <button 
+                      onClick={fetchCorrelations} 
+                      disabled={isCalculatingCorr}
+                      className="flex items-center gap-2 px-4 py-2 bg-sky-500 text-zinc-950 font-semibold rounded-xl hover:bg-sky-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(56,189,248,0.3)] min-w-[140px] justify-center"
+                    >
+                      {isCalculatingCorr ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                      {isCalculatingCorr ? "Scanning..." : "Scan Market"}
+                    </button>
+                  </div>
                </div>
 
                {topCorrelations.length > 0 && (
