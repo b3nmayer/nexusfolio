@@ -1,10 +1,9 @@
-// app/page.tsx
 "use client";
 
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
-import { Upload, Plus, BarChart2, TrendingUp, X, Loader2 } from 'lucide-react';
+import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart } from 'lucide-react';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
@@ -14,7 +13,7 @@ export default function PortfolioAnalyzer() {
   const [compareTickers, setCompareTickers] = useState<string[]>([]);
   const [newCompareTicker, setNewCompareTicker] = useState("");
   const [chartType, setChartType] = useState<'candlestick' | 'line'>('line');
-  const [timeframe, setTimeframe] = useState<number>(30); // days
+  const [timeframe, setTimeframe] = useState<number>(90); // Default to 3M
   const [isLoading, setIsLoading] = useState(false);
 
   // --- CSV IMPORT ---
@@ -24,7 +23,6 @@ export default function PortfolioAnalyzer() {
 
     Papa.parse(file, {
       complete: (results) => {
-        // Extract valid tickers
         const tickers = results.data
           .map((row: any) => row[0]?.trim().toUpperCase())
           .filter((t: string) => t && t !== 'TICKER'); 
@@ -33,7 +31,7 @@ export default function PortfolioAnalyzer() {
         const newPortfolio = tickers.map((t: string) => ({ ticker: t, weight: equalWeight }));
         
         setPortfolio(newPortfolio);
-        fetchDataForTickers([...tickers, ...compareTickers], 365); // Fetch max needed days
+        fetchDataForTickers([...tickers, ...compareTickers], 365);
       }
     });
   };
@@ -44,7 +42,6 @@ export default function PortfolioAnalyzer() {
     const newData: Record<string, any[]> = { ...stockData };
     
     try {
-      // Fetch concurrently to speed up load times
       await Promise.all(tickers.map(async (ticker) => {
         if (!newData[ticker]) {
           const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
@@ -93,7 +90,6 @@ export default function PortfolioAnalyzer() {
     const baseTicker = portfolio[0].ticker;
     const baseData = stockData[baseTicker] || [];
 
-    // Loop through historical dates
     for (let i = 0; i < baseData.length; i++) {
       if (baseData[i].x < cutoffTime) continue;
 
@@ -101,7 +97,6 @@ export default function PortfolioAnalyzer() {
       let totalWeight = 0;
 
       portfolio.forEach(({ ticker, weight }) => {
-        // Find matching date for the current stock
         const sData = stockData[ticker]?.find(d => d.x === baseData[i].x);
         if (sData) {
           const w = weight / 100;
@@ -129,12 +124,11 @@ export default function PortfolioAnalyzer() {
       data: aggregateData
     }];
 
-    // Add Comparison Tickers
     compareTickers.forEach(ticker => {
       const cData = stockData[ticker] || [];
       const filteredData = cData.filter(d => d.x >= cutoffTime).map(d => ({
         x: d.x,
-        y: parseFloat(d.y[3].toFixed(2)) // Use close price for comparison lines
+        y: parseFloat(d.y[3].toFixed(2))
       }));
       
       series.push({
@@ -147,149 +141,205 @@ export default function PortfolioAnalyzer() {
     return series;
   }, [portfolio, stockData, compareTickers, chartType, timeframe]);
 
-  // Chart Configuration
+  // --- 2026 DARK MODE CHART CONFIG ---
   const chartOptions: any = {
-    chart: { type: chartType, animations: { enabled: false }, toolbar: { show: true } },
-    xaxis: { type: 'datetime' },
+    theme: { mode: 'dark' },
+    chart: { 
+      type: chartType, 
+      animations: { enabled: true, easing: 'easeinout', speed: 800 }, 
+      toolbar: { show: false },
+      background: 'transparent',
+      fontFamily: 'inherit'
+    },
+    xaxis: { 
+      type: 'datetime',
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+      grid: { show: false },
+      labels: { style: { colors: '#71717a' } }
+    },
     yaxis: { 
-      labels: { formatter: (value: number) => `$${value.toFixed(2)}` },
+      labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } },
       tooltip: { enabled: true }
     },
-    stroke: { width: chartType === 'line' ? 2 : 1 },
-    colors: ['#3b82f6', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6'],
-    tooltip: { shared: true, intersect: false },
-    noData: { text: isLoading ? 'Loading market data...' : 'No data available' }
+    grid: { 
+      borderColor: '#27272a', 
+      strokeDashArray: 4,
+      xaxis: { lines: { show: true } },   
+      yaxis: { lines: { show: true } }
+    },
+    stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
+    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa'],
+    tooltip: { theme: 'dark', shared: true, intersect: false, style: { fontSize: '14px' } },
+    noData: { text: '' }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 flex flex-col md:flex-row gap-6">
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-sky-500/30 p-4 md:p-8 flex flex-col gap-8 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(56,189,248,0.1),rgba(255,255,255,0))]">
       
-      {/* LEFT COLUMN: Portfolio & Allocation */}
-      <div className="w-full md:w-1/3 bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-6">
-        <div>
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><BarChart2 /> Portfolio Setup</h2>
-          
-          <label className="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
-            <Upload className="w-5 h-5 mr-2 text-gray-500" />
-            <span className="text-gray-600 font-medium">Upload CSV (Tickers)</span>
-            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-          </label>
-          <p className="text-xs text-gray-400 mt-2">CSV format: Single column with stock tickers (e.g., AAPL, TSLA).</p>
+      {/* Header */}
+      <header className="flex items-center justify-between px-2">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-sky-500/10 border border-sky-500/20 rounded-xl">
+            <Activity className="text-sky-400 w-6 h-6" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-zinc-100 to-zinc-500">
+            FolioAnalyzer
+          </h1>
         </div>
+      </header>
 
-        {portfolio.length > 0 && (
-          <div className="flex-1 overflow-y-auto">
-            <h3 className="font-semibold text-gray-700 mb-3 border-b pb-2">Allocations (%)</h3>
-            <div className="space-y-4">
-              {portfolio.map((item, idx) => (
-                <div key={item.ticker} className="flex items-center gap-4">
-                  <span className="font-bold w-16 text-gray-700">{item.ticker}</span>
-                  <input 
-                    type="range" 
-                    min="0" max="100" 
-                    value={item.weight} 
-                    onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                    className="flex-1"
-                  />
-                  <input 
-                    type="number" 
-                    value={item.weight.toFixed(1)} 
-                    onChange={(e) => updateWeight(idx, Number(e.target.value))}
-                    className="w-16 p-1 text-right border rounded"
-                  />
-                </div>
-              ))}
+      <div className="flex flex-col xl:flex-row gap-6 h-full flex-1">
+        
+        {/* LEFT COLUMN: Setup Panel */}
+        <div className="w-full xl:w-1/3 flex flex-col gap-6">
+          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-6 flex-1">
+            
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+                <PieChart className="w-5 h-5 text-sky-400" /> Allocation Setup
+              </h2>
             </div>
             
-            <div className="mt-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm flex justify-between">
-              <span>Total Weight:</span>
-              <span className="font-bold">
-                {portfolio.reduce((sum, item) => sum + item.weight, 0).toFixed(1)}%
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
+            <label className="group relative flex flex-col items-center justify-center w-full p-6 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-sky-500/50 transition-all duration-300 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-b from-sky-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <Upload className="w-6 h-6 mb-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+              <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
+              <span className="text-xs text-zinc-600 mt-1">Single column format</span>
+              <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+            </label>
 
-      {/* RIGHT COLUMN: Charts & Comparisons */}
-      <div className="w-full md:w-2/3 flex flex-col gap-6">
-        
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center justify-between">
+            {portfolio.length > 0 && (
+              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-5 mt-2">
+                  {portfolio.map((item, idx) => (
+                    <div key={item.ticker} className="flex flex-col gap-2 group">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="font-semibold text-zinc-300 group-hover:text-white transition-colors">{item.ticker}</span>
+                        <input 
+                          type="number" 
+                          value={item.weight.toFixed(1)} 
+                          onChange={(e) => updateWeight(idx, Number(e.target.value))}
+                          className="w-16 p-1 text-right bg-zinc-950 border border-zinc-800 rounded-md text-xs text-zinc-300 focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all"
+                        />
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" max="100" 
+                        value={item.weight} 
+                        onChange={(e) => updateWeight(idx, Number(e.target.value))}
+                        className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-sky-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {portfolio.length > 0 && (
+              <div className="pt-4 border-t border-zinc-800/50 flex justify-between items-center">
+                <span className="text-sm text-zinc-500">Total Allocation</span>
+                <span className={`text-sm font-mono font-bold ${portfolio.reduce((s, i) => s + i.weight, 0) === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {portfolio.reduce((sum, item) => sum + item.weight, 0).toFixed(1)}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Terminal / Chart */}
+        <div className="w-full xl:w-2/3 flex flex-col gap-6">
           
-          <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-            {[ {label: '1M', days: 30}, {label: '3M', days: 90}, {label: '6M', days: 180}, {label: '1Y', days: 365} ].map(tf => (
-              <button 
-                key={tf.label}
-                onClick={() => setTimeframe(tf.days)}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition ${timeframe === tf.days ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}
-              >
-                {tf.label}
+          {/* Top Control Bar */}
+          <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg">
+            
+            <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl">
+              {[ {label: '1M', days: 30}, {label: '3M', days: 90}, {label: '6M', days: 180}, {label: '1Y', days: 365} ].map(tf => (
+                <button 
+                  key={tf.label}
+                  onClick={() => setTimeframe(tf.days)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${timeframe === tf.days ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl">
+              <button onClick={() => setChartType('line')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1.5 ${chartType === 'line' ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <TrendingUp size={14}/> Line
               </button>
-            ))}
-          </div>
-
-          <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-            <button onClick={() => setChartType('line')} className={`px-3 py-1 rounded-md text-sm font-medium transition flex items-center gap-1 ${chartType === 'line' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
-              <TrendingUp size={16}/> Line
-            </button>
-            <button onClick={() => setChartType('candlestick')} className={`px-3 py-1 rounded-md text-sm font-medium transition flex items-center gap-1 ${chartType === 'candlestick' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
-              <BarChart2 size={16}/> Candle
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input 
-              type="text" 
-              placeholder="Compare (e.g. SPY)" 
-              value={newCompareTicker}
-              onChange={(e) => setNewCompareTicker(e.target.value)}
-              className="border p-1.5 rounded-md w-40 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
-              onKeyDown={(e) => e.key === 'Enter' && addCompareTicker()}
-            />
-            <button onClick={addCompareTicker} disabled={isLoading} className="p-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50">
-              <Plus size={18} />
-            </button>
-          </div>
-        </div>
-
-        {compareTickers.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
-            {compareTickers.map(ticker => (
-              <span key={ticker} className="flex items-center gap-1 px-3 py-1 bg-gray-200 rounded-full text-sm font-medium text-gray-700">
-                {ticker}
-                <X size={14} className="cursor-pointer hover:text-red-500" onClick={() => removeCompareTicker(ticker)} />
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="flex-1 bg-white p-6 rounded-xl shadow-sm border border-gray-200 min-h-[400px] relative">
-          {isLoading && (
-            <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center flex-col gap-3 backdrop-blur-sm rounded-xl">
-              <Loader2 className="animate-spin text-blue-600" size={32} />
-              <p className="text-gray-600 font-medium">Fetching market data...</p>
+              <button onClick={() => setChartType('candlestick')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1.5 ${chartType === 'candlestick' ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}>
+                <BarChart2 size={14}/> Candle
+              </button>
             </div>
-          )}
-          
-          {portfolio.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-gray-400 flex-col gap-2">
-              <BarChart2 size={48} className="opacity-50" />
-              <p>Upload a CSV with real tickers (e.g., AAPL, MSFT) to begin.</p>
-            </div>
-          ) : (
-            <div className="h-full w-full">
-              {typeof window !== 'undefined' && (
-                <Chart 
-                  options={chartOptions} 
-                  series={chartSeries} 
-                  type={chartType === 'candlestick' ? 'candlestick' : 'line'} 
-                  height="100%" 
+
+            <div className="flex items-center gap-2 pr-2">
+              <div className="relative">
+                <input 
+                  type="text" 
+                  placeholder="Compare (e.g. SPY)" 
+                  value={newCompareTicker}
+                  onChange={(e) => setNewCompareTicker(e.target.value)}
+                  className="bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 pr-8 py-1.5 w-36 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all uppercase"
+                  onKeyDown={(e) => e.key === 'Enter' && addCompareTicker()}
                 />
-              )}
+                <button onClick={addCompareTicker} disabled={isLoading} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-sky-400 transition-colors disabled:opacity-50">
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {compareTickers.length > 0 && (
+            <div className="flex gap-2 flex-wrap px-1">
+              {compareTickers.map(ticker => (
+                <span key={ticker} className="flex items-center gap-1.5 px-3 py-1 bg-zinc-800/50 border border-zinc-700/50 rounded-full text-xs font-medium text-zinc-300 backdrop-blur-sm group">
+                  {ticker}
+                  <X size={12} className="cursor-pointer text-zinc-500 group-hover:text-rose-400 transition-colors" onClick={() => removeCompareTicker(ticker)} />
+                </span>
+              ))}
             </div>
           )}
+
+          {/* Main Chart Window */}
+          <div className="flex-1 bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/50 rounded-3xl shadow-2xl min-h-[500px] relative overflow-hidden group">
+            
+            {/* Subtle inner glow */}
+            <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
+
+            {isLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center flex-col gap-4 bg-zinc-950/40 backdrop-blur-sm">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-sky-500 blur-xl opacity-20 animate-pulse rounded-full" />
+                  <Loader2 className="animate-spin text-sky-400 relative z-10" size={36} />
+                </div>
+                <p className="text-zinc-400 font-medium text-sm tracking-wide">Syncing Market Data...</p>
+              </div>
+            )}
+            
+            {portfolio.length === 0 ? (
+              <div className="h-full flex items-center justify-center flex-col gap-4 text-zinc-600">
+                <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center mb-2">
+                  <Activity size={32} className="text-zinc-500" />
+                </div>
+                <p className="text-sm">Upload a CSV to initialize terminal.</p>
+              </div>
+            ) : (
+              <div className="h-full w-full p-4 pt-6">
+                {typeof window !== 'undefined' && (
+                  <Chart 
+                    options={chartOptions} 
+                    series={chartSeries} 
+                    type={chartType === 'candlestick' ? 'candlestick' : 'line'} 
+                    height="100%" 
+                  />
+                )}
+              </div>
+            )}
+          </div>
+          
         </div>
-        
       </div>
     </div>
   );
