@@ -27,6 +27,31 @@ export default function PortfolioAnalyzer() {
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
 
+  // Sequential Data Fetcher (Anti-Rate-Limit)
+  const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
+    setIsLoading(true);
+    const newData: Record<string, any[]> = { ...stockData };
+    try {
+      for (const ticker of tickers) {
+        if (!newData[ticker]) {
+          const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(`Rejected ticker '${ticker}': ${errorData.error || 'Server error'}`);
+          }
+          const json = await res.json();
+          newData[ticker] = json.data;
+        }
+      }
+      setStockData(newData);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Data Sync Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // CSV Import
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -54,50 +79,10 @@ export default function PortfolioAnalyzer() {
       setNewPortfolioTicker("");
       return; 
     }
-    const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
-    setIsLoading(true);
-    const newData: Record<string, any[]> = { ...stockData };
-    try {
-      // Fetch sequentially to prevent Yahoo Finance rate-limiting
-      for (const ticker of tickers) {
-        if (!newData[ticker]) {
-          const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
-          if (!res.ok) {
-            const errorData = await res.json().catch(() => ({}));
-            throw new Error(`Rejected ticker '${ticker}': ${errorData.error || 'Server error'}`);
-          }
-          const json = await res.json();
-          newData[ticker] = json.data;
-        }
-      }
-      setStockData(newData);
-    } catch (error: any) {
-      console.error(error);
-      alert(`Data Sync Error: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
-    setIsLoading(true);
-    const newData: Record<string, any[]> = { ...stockData };
-    try {
-      await Promise.all(tickers.map(async (ticker) => {
-        if (!newData[ticker]) {
-          const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
-          if (!res.ok) throw new Error(`Failed to fetch ${ticker}`);
-          const json = await res.json();
-          newData[ticker] = json.data;
-        }
-      }));
-      setStockData(newData);
-    } catch (error) {
-      console.error(error);
-      alert("Error fetching stock data.");
-    } finally {
-      setIsLoading(false);
-    }
+    fetchDataForTickers([ticker], 1825);
+    const newWeight = portfolio.length === 0 ? 100 : 0;
+    setPortfolio([...portfolio, { ticker, weight: newWeight }]);
+    setNewPortfolioTicker("");
   };
 
   const updateWeight = (index: number, newWeight: number) => {
@@ -204,7 +189,7 @@ export default function PortfolioAnalyzer() {
     return { startPrice, endPrice, diff, perc };
   }, [chartSeries, chartType]);
 
-  // NEW CORRELATION LOGIC
+  // CORRELATION LOGIC
   const fetchCorrelations = async () => {
     if(aggregateRawData.length < 5) return;
     setIsCalculatingCorr(true);
