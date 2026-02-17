@@ -197,11 +197,14 @@ export default function PortfolioAnalyzer() {
 
   // CORRELATION LOGIC
   const fetchCorrelations = async () => {
-    if(aggregateRawData.length < 5) return;
+    if(aggregateRawData.length < 5) {
+      alert("Not enough data points in this timeframe to calculate correlation.");
+      return;
+    }
+    
     setIsCalculatingCorr(true);
     setTopCorrelations([]);
     
-    // Combine current portfolio holdings + benchmark ETFs
     const baseBenchmarks = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
     const portfolioTickers = portfolio.map(p => p.ticker);
     const targetTickers = Array.from(new Set([...portfolioTickers, ...baseBenchmarks]));
@@ -215,10 +218,23 @@ export default function PortfolioAnalyzer() {
           targetTickers: targetTickers 
         })
       });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      
       const data = await res.json();
-      if(data.topCorrelations) setTopCorrelations(data.topCorrelations);
-    } catch (err) {
+      
+      if(data.topCorrelations && data.topCorrelations.length > 0) {
+        setTopCorrelations(data.topCorrelations);
+      } else {
+        alert("The engine finished scanning, but no valid data matches could be calculated.");
+      }
+      
+    } catch (err: any) {
       console.error(err);
+      alert(`Correlation Engine Error: ${err.message}`);
     } finally {
       setIsCalculatingCorr(false);
     }
