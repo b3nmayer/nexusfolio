@@ -1,5 +1,5 @@
 "use client";
-import './globals.css';
+
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
@@ -12,8 +12,9 @@ export default function PortfolioAnalyzer() {
   const [stockData, setStockData] = useState<Record<string, any[]>>({});
   const [compareTickers, setCompareTickers] = useState<string[]>([]);
   const [newCompareTicker, setNewCompareTicker] = useState("");
+  const [newPortfolioTicker, setNewPortfolioTicker] = useState("");
   const [chartType, setChartType] = useState<'candlestick' | 'line'>('line');
-  const [timeframe, setTimeframe] = useState<number>(90); // Default to 3M
+  const [timeframe, setTimeframe] = useState<number | 'YTD'>(90); // Default 3M
   const [isLoading, setIsLoading] = useState(false);
 
   // --- CSV IMPORT ---
@@ -34,6 +35,22 @@ export default function PortfolioAnalyzer() {
         fetchDataForTickers([...tickers, ...compareTickers], 365);
       }
     });
+  };
+
+  // --- MANUAL TICKER ADDITION ---
+  const addManualTicker = () => {
+    if (!newPortfolioTicker) return;
+    const ticker = newPortfolioTicker.toUpperCase().trim();
+    
+    if (portfolio.some(p => p.ticker === ticker)) {
+      setNewPortfolioTicker("");
+      return; // Prevent duplicates
+    }
+
+    fetchDataForTickers([ticker]);
+    const newWeight = portfolio.length === 0 ? 100 : 0; // 100% if first, 0% if adding to existing
+    setPortfolio([...portfolio, { ticker, weight: newWeight }]);
+    setNewPortfolioTicker("");
   };
 
   // --- REAL DATA FETCHING VIA NEXT.JS API ---
@@ -65,9 +82,15 @@ export default function PortfolioAnalyzer() {
     setPortfolio(newPort);
   };
 
+  const removePortfolioTicker = (index: number) => {
+    const newPort = [...portfolio];
+    newPort.splice(index, 1);
+    setPortfolio(newPort);
+  };
+
   const addCompareTicker = () => {
     if (newCompareTicker && !compareTickers.includes(newCompareTicker.toUpperCase())) {
-      const ticker = newCompareTicker.toUpperCase();
+      const ticker = newCompareTicker.toUpperCase().trim();
       setCompareTickers([...compareTickers, ticker]);
       fetchDataForTickers([ticker]);
       setNewCompareTicker("");
@@ -78,14 +101,20 @@ export default function PortfolioAnalyzer() {
     setCompareTickers(compareTickers.filter(t => t !== ticker));
   };
 
-  // --- AGGREGATE CALCULATIONS ---
+  // --- AGGREGATE CALCULATIONS & REBASING ---
   const chartSeries = useMemo(() => {
     if (portfolio.length === 0) return [];
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - timeframe);
+    // 1. Calculate the Timeframe Cutoff Date
+    let cutoffDate = new Date();
+    if (timeframe === 'YTD') {
+      cutoffDate = new Date(new Date().getFullYear(), 0, 1); // Jan 1st of current year
+    } else {
+      cutoffDate.setDate(cutoffDate.getDate() - (timeframe as number));
+    }
     const cutoffTime = cutoffDate.getTime();
 
+    // 2. Build the Aggregate Portfolio Data
     const aggregateData = [];
     const baseTicker = portfolio[0].ticker;
     const baseData = stockData[baseTicker] || [];
@@ -124,18 +153,30 @@ export default function PortfolioAnalyzer() {
       data: aggregateData
     }];
 
+    // 3. Normalize (Rebase) Comparison Tickers to match Portfolio Start Value
+    const portfolioStartValue = aggregateData.length > 0 
+      ? (chartType === 'candlestick' ? aggregateData[0].y[3] : aggregateData[0].y) 
+      : 0;
+
     compareTickers.forEach(ticker => {
       const cData = stockData[ticker] || [];
-      const filteredData = cData.filter(d => d.x >= cutoffTime).map(d => ({
-        x: d.x,
-        y: parseFloat(d.y[3].toFixed(2))
-      }));
+      const timeFiltered = cData.filter(d => d.x >= cutoffTime);
       
-      series.push({
-        name: ticker,
-        type: 'line',
-        data: filteredData
-      });
+      if (timeFiltered.length > 0 && portfolioStartValue > 0) {
+        const compStartValue = timeFiltered[0].y[3]; // Close price of the first day
+        const ratio = (portfolioStartValue as number) / compStartValue; // Calculate multiplier
+
+        const normalizedData = timeFiltered.map(d => ({
+          x: d.x,
+          y: parseFloat((d.y[3] * ratio).toFixed(2)) // Apply multiplier to perfectly align start points
+        }));
+        
+        series.push({
+          name: `${ticker} (Normalized)`,
+          type: 'line',
+          data: normalizedData
+        });
+      }
     });
 
     return series;
@@ -201,21 +242,45 @@ export default function PortfolioAnalyzer() {
               </h2>
             </div>
             
-            <label className="group relative flex flex-col items-center justify-center w-full p-6 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-sky-500/50 transition-all duration-300 overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-b from-sky-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <Upload className="w-6 h-6 mb-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
-              <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
-              <span className="text-xs text-zinc-600 mt-1">Single column format</span>
-              <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-            </label>
+            <div className="flex flex-col gap-3">
+              <label className="group relative flex flex-col items-center justify-center w-full p-4 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-sky-500/50 transition-all duration-300 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-sky-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Upload className="w-5 h-5 mb-2 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+                <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
+                <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+              </label>
+
+              <div className="flex items-center gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Add manual (e.g. TSLA)" 
+                  value={newPortfolioTicker}
+                  onChange={(e) => setNewPortfolioTicker(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addManualTicker()}
+                  className="flex-1 bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all uppercase"
+                />
+                <button 
+                  onClick={addManualTicker} 
+                  disabled={isLoading || !newPortfolioTicker}
+                  className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/20 transition-all disabled:opacity-50"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
 
             {portfolio.length > 0 && (
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                <div className="space-y-5 mt-2">
+              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar border-t border-zinc-800/50 pt-4 mt-2">
+                <div className="space-y-5">
                   {portfolio.map((item, idx) => (
                     <div key={item.ticker} className="flex flex-col gap-2 group">
                       <div className="flex justify-between items-center text-sm">
-                        <span className="font-semibold text-zinc-300 group-hover:text-white transition-colors">{item.ticker}</span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => removePortfolioTicker(idx)} className="text-zinc-600 hover:text-rose-400 transition-colors">
+                            <X size={14} />
+                          </button>
+                          <span className="font-semibold text-zinc-300 group-hover:text-white transition-colors">{item.ticker}</span>
+                        </div>
                         <input 
                           type="number" 
                           value={item.weight.toFixed(1)} 
@@ -254,11 +319,12 @@ export default function PortfolioAnalyzer() {
           <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg">
             
             <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl">
-              {[ {label: '1M', days: 30}, {label: '3M', days: 90}, {label: '6M', days: 180}, {label: '1Y', days: 365} ].map(tf => (
+              {/* Added YTD Option here */}
+              {[ {label: '1M', val: 30}, {label: '3M', val: 90}, {label: '6M', val: 180}, {label: 'YTD', val: 'YTD'}, {label: '1Y', val: 365} ].map(tf => (
                 <button 
                   key={tf.label}
-                  onClick={() => setTimeframe(tf.days)}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${timeframe === tf.days ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                  onClick={() => setTimeframe(tf.val as any)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 ${timeframe === tf.val ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
                 >
                   {tf.label}
                 </button>
@@ -305,7 +371,6 @@ export default function PortfolioAnalyzer() {
           {/* Main Chart Window */}
           <div className="flex-1 bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/50 rounded-3xl shadow-2xl min-h-[500px] relative overflow-hidden group">
             
-            {/* Subtle inner glow */}
             <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
 
             {isLoading && (
@@ -323,7 +388,7 @@ export default function PortfolioAnalyzer() {
                 <div className="w-16 h-16 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 flex items-center justify-center mb-2">
                   <Activity size={32} className="text-zinc-500" />
                 </div>
-                <p className="text-sm">Upload a CSV to initialize terminal.</p>
+                <p className="text-sm">Upload a CSV or add a ticker manually to initialize terminal.</p>
               </div>
             ) : (
               <div className="h-full w-full p-4 pt-6">
