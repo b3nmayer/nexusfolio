@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
-import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Calendar, Network, Search } from 'lucide-react';
+import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare } from 'lucide-react';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
@@ -23,10 +23,13 @@ export default function PortfolioAnalyzer() {
   });
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().split('T')[0]);
 
+  // SMA Indicators Toggle
+  const [showSMA, setShowSMA] = useState({ 20: false, 50: false, 200: false });
+
   // Correlation Engine
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
-  const [corrTimeframe, setCorrTimeframe] = useState<number>(90); // Independent Correlation Timeframe
+  const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
 
   // Sequential Data Fetcher
   const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
@@ -111,7 +114,7 @@ export default function PortfolioAnalyzer() {
     setCompareTickers(compareTickers.filter(t => t !== ticker));
   };
 
-  // Chart Data Processing
+  // Advanced Chart Data Processing (Pre-Calculates 5 Years for SMAs)
   const { chartSeries, aggregateRawData } = useMemo(() => {
     if (portfolio.length === 0) return { chartSeries: [], aggregateRawData: [] };
 
@@ -128,16 +131,13 @@ export default function PortfolioAnalyzer() {
       startTime = d.getTime();
     }
 
-    const aggregateData = [];
-    const rawDailyData = [];
     const baseTicker = portfolio[0].ticker;
     const baseData = stockData[baseTicker] || [];
 
+    // 1. Calculate the entire 5-year history of the aggregate portfolio first
+    const fullAggData: any[] = [];
     for (let i = 0; i < baseData.length; i++) {
-      if (baseData[i].x < startTime || baseData[i].x > endTime) continue;
-
-      let aggOpen = 0, aggHigh = 0, aggLow = 0, aggClose = 0;
-      let totalWeight = 0;
+      let aggOpen = 0, aggHigh = 0, aggLow = 0, aggClose = 0, totalWeight = 0;
 
       portfolio.forEach(({ ticker, weight }) => {
         const sData = stockData[ticker]?.find(d => d.x === baseData[i].x);
@@ -152,18 +152,53 @@ export default function PortfolioAnalyzer() {
       });
 
       if (totalWeight > 0) {
-        const closeVal = parseFloat(aggClose.toFixed(2));
-        aggregateData.push({
+        fullAggData.push({
           x: baseData[i].x,
-          y: chartType === 'candlestick' ? [aggOpen, aggHigh, aggLow, aggClose].map(v => parseFloat(v.toFixed(2))) : closeVal
+          ohlc: [aggOpen, aggHigh, aggLow, aggClose],
+          close: aggClose
         });
-        rawDailyData.push({ date: baseData[i].x, price: closeVal });
       }
     }
+
+    // 2. Filter data specifically for the chosen visual chart timeframe
+    const aggregateData: any[] = [];
+    const rawDailyData: any[] = [];
+    
+    fullAggData.forEach(d => {
+      if (d.x >= startTime && d.x <= endTime) {
+        const closeVal = parseFloat(d.close.toFixed(2));
+        aggregateData.push({
+          x: d.x,
+          y: chartType === 'candlestick' ? d.ohlc.map((v: number) => parseFloat(v.toFixed(2))) : closeVal
+        });
+        rawDailyData.push({ date: d.x, price: closeVal });
+      }
+    });
 
     const series: any[] = [{ name: 'Aggregate Portfolio', type: chartType, data: aggregateData }];
     const portfolioStartValue = aggregateData.length > 0 ? (chartType === 'candlestick' ? aggregateData[0].y[3] : aggregateData[0].y) : 0;
 
+    // 3. Calculate SMAs (Looking back into full history), then slice to fit chart
+    [20, 50, 200].forEach(smaDays => {
+      if (showSMA[smaDays as keyof typeof showSMA]) {
+         const smaData = [];
+         for(let i = 0; i < fullAggData.length; i++) {
+           if (i >= smaDays - 1) {
+             let sum = 0;
+             for(let j = 0; j < smaDays; j++) { sum += fullAggData[i - j].close; }
+             const avg = parseFloat((sum / smaDays).toFixed(2));
+             
+             // Only display SMA points that fall within the visual chart window
+             if (fullAggData[i].x >= startTime && fullAggData[i].x <= endTime) {
+               smaData.push({ x: fullAggData[i].x, y: avg });
+             }
+           }
+         }
+         series.push({ name: `${smaDays} Day SMA`, type: 'line', data: smaData });
+      }
+    });
+
+    // 4. Calculate Normalized Comparison Tickers
     compareTickers.forEach(ticker => {
       const cData = stockData[ticker] || [];
       const timeFiltered = cData.filter(d => d.x >= startTime && d.x <= endTime);
@@ -178,7 +213,7 @@ export default function PortfolioAnalyzer() {
     });
 
     return { chartSeries: series, aggregateRawData: rawDailyData };
-  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd]);
+  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA]);
 
   const portfolioStats = useMemo(() => {
     if(!chartSeries[0] || chartSeries[0].data.length === 0) return null;
@@ -194,10 +229,15 @@ export default function PortfolioAnalyzer() {
   const fetchCorrelations = async () => {
     if(portfolio.length === 0) return;
     
-    // 1. Generate a custom dataset based specifically on the 'corrTimeframe' dropdown
-    const corrStartTime = new Date();
-    corrStartTime.setDate(corrStartTime.getDate() - corrTimeframe);
-    const corrStartMs = corrStartTime.getTime();
+    // Generate custom dataset based on the 'corrTimeframe' dropdown
+    let corrStartMs = 0;
+    if (corrTimeframe === 'YTD') {
+      corrStartMs = new Date(new Date().getFullYear(), 0, 1).getTime();
+    } else {
+      const corrStartTime = new Date();
+      corrStartTime.setDate(corrStartTime.getDate() - (corrTimeframe as number));
+      corrStartMs = corrStartTime.getTime();
+    }
 
     const corrData = [];
     const baseTicker = portfolio[0].ticker;
@@ -205,9 +245,7 @@ export default function PortfolioAnalyzer() {
 
     for (let i = 0; i < baseData.length; i++) {
       if (baseData[i].x < corrStartMs) continue;
-
-      let aggClose = 0;
-      let totalWeight = 0;
+      let aggClose = 0, totalWeight = 0;
 
       portfolio.forEach(({ ticker, weight }) => {
         const sData = stockData[ticker]?.find(d => d.x === baseData[i].x);
@@ -239,10 +277,7 @@ export default function PortfolioAnalyzer() {
       const res = await fetch('/api/stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          portfolioData: corrData,
-          targetTickers: targetTickers 
-        })
+        body: JSON.stringify({ portfolioData: corrData, targetTickers: targetTickers })
       });
       const data = await res.json();
       if(data.topCorrelations) setTopCorrelations(data.topCorrelations);
@@ -263,8 +298,27 @@ export default function PortfolioAnalyzer() {
     yaxis: { labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } }, tooltip: { enabled: true } },
     grid: { borderColor: '#27272a', strokeDashArray: 4, xaxis: { lines: { show: true } }, yaxis: { lines: { show: true } } },
     stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
-    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa'],
-    tooltip: { theme: 'dark', shared: true, intersect: false },
+    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'], // Expanded colors for SMAs
+    tooltip: { 
+      theme: 'dark', 
+      shared: true, 
+      intersect: false,
+      y: {
+        // Advanced formatter: Appends percentage change to the tooltip value
+        formatter: function (value: number, opts: any) {
+          if (typeof value !== 'number') return value; 
+          
+          let startVal = opts?.w?.globals?.initialSeries?.[opts.seriesIndex]?.data?.[0]?.y;
+          if (Array.isArray(startVal)) startVal = startVal[3]; 
+
+          if (startVal && typeof startVal === 'number' && startVal !== 0) {
+            const perc = ((value - startVal) / startVal) * 100;
+            return `$${value.toFixed(2)} (${perc >= 0 ? '+' : ''}${perc.toFixed(2)}%)`;
+          }
+          return `$${value.toFixed(2)}`;
+        }
+      }
+    },
     noData: { text: '' }
   };
 
@@ -282,10 +336,9 @@ export default function PortfolioAnalyzer() {
         </div>
       </header>
 
-      {/* Main Flex Layout ensures both columns stretch */}
       <div className="flex flex-col xl:flex-row gap-6 flex-1 items-stretch">
         
-        {/* LEFT COLUMN: Uses flex-col and flex-1 to stretch full height */}
+        {/* LEFT COLUMN */}
         <div className="w-full xl:w-1/3 flex flex-col min-h-[500px]">
           <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-6 rounded-3xl shadow-2xl flex flex-col gap-6 flex-1 h-full">
             <h2 className="text-lg font-medium text-zinc-200 flex items-center gap-2 shrink-0">
@@ -312,7 +365,6 @@ export default function PortfolioAnalyzer() {
               </div>
             </div>
 
-            {/* List scrolls dynamically, leaves room for total at the bottom */}
             {portfolio.length > 0 && (
               <>
                 <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar border-t border-zinc-800/50 pt-4 mt-2 pr-2">
@@ -340,7 +392,6 @@ export default function PortfolioAnalyzer() {
                   </div>
                 </div>
 
-                {/* Restored Total Allocation Math (Sticks to bottom) */}
                 <div className="pt-4 border-t border-zinc-800/50 flex justify-between items-center mt-auto shrink-0">
                   <span className="text-sm text-zinc-500">Total Allocation</span>
                   <span className={`text-sm font-mono font-bold ${portfolio.reduce((s, i) => s + i.weight, 0) === 100 ? 'text-emerald-400' : 'text-amber-400'}`}>
@@ -355,10 +406,11 @@ export default function PortfolioAnalyzer() {
         {/* RIGHT COLUMN */}
         <div className="w-full xl:w-2/3 flex flex-col gap-6">
           
+          {/* Top Control Bar */}
           <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg shrink-0">
             
-            <div className="flex gap-1 items-center">
-              <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl mr-2">
+            <div className="flex gap-2 items-center flex-wrap">
+              <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl">
                 {[ {label: '1M', val: 30}, {label: '3M', val: 90}, {label: '6M', val: 180}, {label: 'YTD', val: 'YTD'}, {label: '1Y', val: 365}, {label: 'Custom', val: 'CUSTOM'} ].map(tf => (
                   <button 
                     key={tf.label} onClick={() => setTimeframe(tf.val as any)}
@@ -367,6 +419,19 @@ export default function PortfolioAnalyzer() {
                     {tf.label}
                   </button>
                 ))}
+              </div>
+
+              {/* NEW SMA TOGGLE BUTTONS */}
+              <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl hidden md:flex">
+                 {[20, 50, 200].map(days => (
+                   <button
+                      key={days}
+                      onClick={() => setShowSMA(prev => ({...prev, [days]: !prev[days as keyof typeof prev]}))}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1 ${showSMA[days as keyof typeof showSMA] ? 'bg-zinc-800 text-sky-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                   >
+                      <ActivitySquare size={12} /> SMA {days}
+                   </button>
+                 ))}
               </div>
 
               {timeframe === 'CUSTOM' && (
@@ -453,15 +518,16 @@ export default function PortfolioAnalyzer() {
                   </div>
                   
                   <div className="flex items-center gap-3">
-                    {/* NEW INDEPENDENT DROPDOWN */}
                     <select 
                       value={corrTimeframe} 
-                      onChange={(e) => setCorrTimeframe(Number(e.target.value))}
+                      onChange={(e) => setCorrTimeframe(e.target.value === 'YTD' ? 'YTD' : Number(e.target.value))}
                       className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-sky-500/50 appearance-none cursor-pointer"
                     >
+                      <option value={7}>Last 1 Week</option>
                       <option value={30}>Last 1 Month</option>
                       <option value={90}>Last 3 Months</option>
                       <option value={180}>Last 6 Months</option>
+                      <option value="YTD">YTD</option>
                       <option value={365}>Last 1 Year</option>
                       <option value={1095}>Last 3 Years</option>
                     </select>
