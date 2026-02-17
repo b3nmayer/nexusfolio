@@ -3,9 +3,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
-import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare } from 'lucide-react';
+import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare, RotateCcw, Info } from 'lucide-react';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
+
+// The fixed universe of benchmark ETFs we always correlate against
+const BASE_BENCHMARKS = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
 
 export default function PortfolioAnalyzer() {
   const [portfolio, setPortfolio] = useState<{ ticker: string, weight: number }[]>([]);
@@ -30,6 +33,19 @@ export default function PortfolioAnalyzer() {
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
   const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
+
+  // --- NEW: Reset Function ---
+  const handleReset = () => {
+    setPortfolio([]);
+    setStockData({});
+    setCompareTickers([]);
+    setNewCompareTicker("");
+    setNewPortfolioTicker("");
+    setTopCorrelations([]);
+    setTimeframe(90);
+    setCorrTimeframe(90);
+    setShowSMA({ 20: false, 50: false, 200: false });
+  };
 
   // Sequential Data Fetcher
   const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
@@ -114,7 +130,7 @@ export default function PortfolioAnalyzer() {
     setCompareTickers(compareTickers.filter(t => t !== ticker));
   };
 
-  // Advanced Chart Data Processing (Pre-Calculates 5 Years for SMAs)
+  // Chart Data Processing
   const { chartSeries, aggregateRawData } = useMemo(() => {
     if (portfolio.length === 0) return { chartSeries: [], aggregateRawData: [] };
 
@@ -134,7 +150,6 @@ export default function PortfolioAnalyzer() {
     const baseTicker = portfolio[0].ticker;
     const baseData = stockData[baseTicker] || [];
 
-    // 1. Calculate the entire 5-year history of the aggregate portfolio first
     const fullAggData: any[] = [];
     for (let i = 0; i < baseData.length; i++) {
       let aggOpen = 0, aggHigh = 0, aggLow = 0, aggClose = 0, totalWeight = 0;
@@ -160,7 +175,6 @@ export default function PortfolioAnalyzer() {
       }
     }
 
-    // 2. Filter data specifically for the chosen visual chart timeframe
     const aggregateData: any[] = [];
     const rawDailyData: any[] = [];
     
@@ -178,7 +192,6 @@ export default function PortfolioAnalyzer() {
     const series: any[] = [{ name: 'Aggregate Portfolio', type: chartType, data: aggregateData }];
     const portfolioStartValue = aggregateData.length > 0 ? (chartType === 'candlestick' ? aggregateData[0].y[3] : aggregateData[0].y) : 0;
 
-    // 3. Calculate SMAs (Looking back into full history), then slice to fit chart
     [20, 50, 200].forEach(smaDays => {
       if (showSMA[smaDays as keyof typeof showSMA]) {
          const smaData = [];
@@ -188,7 +201,6 @@ export default function PortfolioAnalyzer() {
              for(let j = 0; j < smaDays; j++) { sum += fullAggData[i - j].close; }
              const avg = parseFloat((sum / smaDays).toFixed(2));
              
-             // Only display SMA points that fall within the visual chart window
              if (fullAggData[i].x >= startTime && fullAggData[i].x <= endTime) {
                smaData.push({ x: fullAggData[i].x, y: avg });
              }
@@ -198,7 +210,6 @@ export default function PortfolioAnalyzer() {
       }
     });
 
-    // 4. Calculate Normalized Comparison Tickers
     compareTickers.forEach(ticker => {
       const cData = stockData[ticker] || [];
       const timeFiltered = cData.filter(d => d.x >= startTime && d.x <= endTime);
@@ -229,7 +240,6 @@ export default function PortfolioAnalyzer() {
   const fetchCorrelations = async () => {
     if(portfolio.length === 0) return;
     
-    // Generate custom dataset based on the 'corrTimeframe' dropdown
     let corrStartMs = 0;
     if (corrTimeframe === 'YTD') {
       corrStartMs = new Date(new Date().getFullYear(), 0, 1).getTime();
@@ -269,9 +279,8 @@ export default function PortfolioAnalyzer() {
     setIsCalculatingCorr(true);
     setTopCorrelations([]);
     
-    const baseBenchmarks = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
     const portfolioTickers = portfolio.map(p => p.ticker);
-    const targetTickers = Array.from(new Set([...portfolioTickers, ...baseBenchmarks]));
+    const targetTickers = Array.from(new Set([...portfolioTickers, ...BASE_BENCHMARKS]));
 
     try {
       const res = await fetch('/api/stock', {
@@ -291,6 +300,11 @@ export default function PortfolioAnalyzer() {
 
   useEffect(() => { setTopCorrelations([]); }, [corrTimeframe, portfolio]);
 
+  // Dynamically calculate which benchmarks are not in the portfolio for the info text
+  const externalBenchmarks = useMemo(() => {
+    return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
+  }, [portfolio]);
+
   const chartOptions: any = {
     theme: { mode: 'dark' },
     chart: { type: chartType, animations: { enabled: false }, toolbar: { show: false }, background: 'transparent', fontFamily: 'inherit' },
@@ -298,13 +312,12 @@ export default function PortfolioAnalyzer() {
     yaxis: { labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } }, tooltip: { enabled: true } },
     grid: { borderColor: '#27272a', strokeDashArray: 4, xaxis: { lines: { show: true } }, yaxis: { lines: { show: true } } },
     stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
-    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'], // Expanded colors for SMAs
+    colors: ['#38bdf8', '#34d399', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'],
     tooltip: { 
       theme: 'dark', 
       shared: true, 
       intersect: false,
       y: {
-        // Advanced formatter: Appends percentage change to the tooltip value
         formatter: function (value: number, opts: any) {
           if (typeof value !== 'number') return value; 
           
@@ -334,6 +347,16 @@ export default function PortfolioAnalyzer() {
             FolioAnalyzer
           </h1>
         </div>
+        
+        {/* NEW RESET BUTTON */}
+        {portfolio.length > 0 && (
+          <button 
+            onClick={handleReset}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg transition-colors"
+          >
+            <RotateCcw size={14} /> Reset UI
+          </button>
+        )}
       </header>
 
       <div className="flex flex-col xl:flex-row gap-6 flex-1 items-stretch">
@@ -406,7 +429,6 @@ export default function PortfolioAnalyzer() {
         {/* RIGHT COLUMN */}
         <div className="w-full xl:w-2/3 flex flex-col gap-6">
           
-          {/* Top Control Bar */}
           <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg shrink-0">
             
             <div className="flex gap-2 items-center flex-wrap">
@@ -421,7 +443,6 @@ export default function PortfolioAnalyzer() {
                 ))}
               </div>
 
-              {/* NEW SMA TOGGLE BUTTONS */}
               <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl hidden md:flex">
                  {[20, 50, 200].map(days => (
                    <button
@@ -544,14 +565,24 @@ export default function PortfolioAnalyzer() {
                </div>
 
                {topCorrelations.length > 0 && (
-                 <div className="flex flex-wrap gap-3 mt-2">
-                    {topCorrelations.map((c, i) => (
-                      <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1">
-                        <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
-                        <span className="text-sky-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
-                      </div>
-                    ))}
-                 </div>
+                 <>
+                   <div className="flex flex-wrap gap-3 mt-2">
+                      {topCorrelations.map((c, i) => (
+                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1 hover:border-sky-500/30 transition-colors">
+                          <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
+                          <span className="text-sky-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                   </div>
+                   
+                   {/* NEW: External Benchmarks Info Footer */}
+                   {externalBenchmarks.length > 0 && (
+                     <div className="mt-2 text-xs text-zinc-500/80 flex items-center gap-1.5 border-t border-zinc-800/50 pt-3">
+                       <Info size={14} className="text-zinc-400 shrink-0" />
+                       <span>Also evaluating benchmark ETFs: <span className="text-zinc-400">{externalBenchmarks.join(', ')}</span></span>
+                     </div>
+                   )}
+                 </>
                )}
             </div>
           )}
