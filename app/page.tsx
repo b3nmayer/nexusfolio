@@ -100,17 +100,37 @@ export default function NexusFolio() {
     }
   };
 
+  // --- UPDATED CSV IMPORT LOGIC ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     Papa.parse(file, {
-      complete: (results) => {
-        const tickers = results.data
-          .map((row: any) => row[0]?.trim().toUpperCase())
-          .filter((t: string) => t && t !== 'TICKER'); 
+      skipEmptyLines: true,
+      complete: (results: any) => {
+        const rows = results.data;
+        if (!rows || rows.length === 0) return;
+
+        const tickers = rows[0].map((c: string) => c?.trim().toUpperCase()).filter(Boolean);
+        if (tickers.length === 0) return;
+
+        let useEqualWeight = true;
+        let weights: number[] = [];
+
+        if (rows.length > 1) {
+          const parsedWeights = rows[1].map((c: string) => parseFloat(c?.trim()));
+          if (parsedWeights.slice(0, tickers.length).some((w: number) => !isNaN(w))) {
+            useEqualWeight = false;
+            weights = parsedWeights;
+          }
+        }
+
         const equalWeight = 100 / tickers.length;
-        const newPortfolio = tickers.map((t: string) => ({ ticker: t, weight: equalWeight }));
+        const newPortfolio = tickers.map((t: string, idx: number) => {
+          const w = useEqualWeight ? equalWeight : (isNaN(weights[idx]) ? 0 : weights[idx]);
+          return { ticker: t, weight: w };
+        });
+
         setPortfolio(newPortfolio);
         fetchDataForTickers([...tickers, ...compareTickers], 1825);
       }
@@ -250,29 +270,17 @@ export default function NexusFolio() {
       const endPrice = rawDailyData[rawDailyData.length - 1].price;
       const perc = ((endPrice - startPrice) / startPrice) * 100;
       
-      const dailyReturns = [];
       let peak = startPrice;
       let maxDrawdown = 0;
 
       for (let i = 1; i < rawDailyData.length; i++) {
-        const prev = rawDailyData[i-1].price;
         const curr = rawDailyData[i].price;
-        const ret = (curr - prev) / prev;
-        dailyReturns.push(ret);
-
         if (curr > peak) peak = curr;
         const dd = (peak - curr) / peak;
         if (dd > maxDrawdown) maxDrawdown = dd;
       }
 
-      const bestDay = dailyReturns.length > 0 ? Math.max(...dailyReturns) * 100 : 0;
-      const worstDay = dailyReturns.length > 0 ? Math.min(...dailyReturns) * 100 : 0;
-
-      const meanReturn = dailyReturns.reduce((a,b) => a+b, 0) / (dailyReturns.length || 1);
-      const variance = dailyReturns.reduce((a,b) => a + Math.pow(b - meanReturn, 2), 0) / (dailyReturns.length || 1);
-      const volatility = Math.sqrt(variance) * Math.sqrt(252) * 100; 
-
-      stats = { startPrice, endPrice, perc, maxDrawdown: maxDrawdown * 100, bestDay, worstDay, volatility };
+      stats = { startPrice, endPrice, perc, maxDrawdown: maxDrawdown * 100 };
     }
 
     // --- Calculate Individual Ticker Performance ---
@@ -431,10 +439,14 @@ export default function NexusFolio() {
               <label className="group relative flex flex-col items-center justify-center w-full p-4 border border-dashed border-zinc-700/50 rounded-2xl cursor-pointer hover:bg-zinc-800/50 hover:border-cyan-500/50 transition-all">
                 <Upload className="w-5 h-5 mb-2 text-zinc-400 group-hover:text-cyan-400 transition-colors" />
                 <span className="text-sm font-medium text-zinc-300">Import CSV Tickers</span>
+                <p className="text-[10px] text-zinc-500 mt-1.5 text-center leading-tight">
+                  Row 1: Tickers (AAPL, TSLA)<br/>
+                  Row 2 (Optional): Weights (60, 40)
+                </p>
                 <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
               </label>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mt-2">
                 <input 
                   type="text" placeholder="Add manual (e.g. TSLA)" value={newPortfolioTicker}
                   onChange={(e) => setNewPortfolioTicker(e.target.value)}
@@ -602,20 +614,8 @@ export default function NexusFolio() {
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-zinc-500">Volatility (Ann.)</span>
-                      <span className="text-sm font-medium text-zinc-200">±{portfolioStats.volatility.toFixed(2)}%</span>
-                    </div>
-                    <div className="flex justify-between items-center">
                       <span className="text-xs text-zinc-500">Max Drawdown</span>
                       <span className="text-sm font-medium text-rose-400">-{portfolioStats.maxDrawdown.toFixed(2)}%</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-zinc-500">Best Day</span>
-                      <span className="text-sm font-medium text-emerald-400">+{portfolioStats.bestDay.toFixed(2)}%</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-zinc-500">Worst Day</span>
-                      <span className="text-sm font-medium text-rose-400">{portfolioStats.worstDay.toFixed(2)}%</span>
                     </div>
                   </div>
                 </div>
