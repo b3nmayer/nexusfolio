@@ -3,6 +3,7 @@ import YahooFinance from 'yahoo-finance2';
 
 const yahooFinance = new YahooFinance();
 
+// --- MATH HELPER ---
 function pearsonCorrelation(x: number[], y: number[]) {
   const n = x.length;
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
@@ -16,9 +17,46 @@ function pearsonCorrelation(x: number[], y: number[]) {
   return den === 0 ? 0 : num / den;
 }
 
+// --- GET: FETCH STOCK CHARTS ---
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const ticker = searchParams.get('ticker');
+  const days = parseInt(searchParams.get('days') || '1825');
+
+  if (!ticker) {
+    return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
+  }
+
+  try {
+    const period2Date = new Date(); 
+    const period1Date = new Date();
+    period1Date.setDate(period1Date.getDate() - days);
+
+    const result = (await yahooFinance.historical(ticker, {
+      period1: period1Date,
+      period2: period2Date
+    })) as any[];
+
+    if (!result || result.length === 0) throw new Error("Empty dataset.");
+
+    const formattedData = result.map((quote: any) => ({
+      x: new Date(quote.date).getTime(),
+      y: [
+        Number(quote.open.toFixed(2)),
+        Number(quote.high.toFixed(2)),
+        Number(quote.low.toFixed(2)),
+        Number(quote.close.toFixed(2)),
+      ],
+    }));
+
+    return NextResponse.json({ ticker, data: formattedData });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Failed to fetch stock data.' }, { status: 500 });
+  }
+}
+
+// --- POST: CORRELATION ENGINE ---
 export async function POST(request: Request) {
-  console.log("[CORRELATION] Engine started!");
-  
   try {
     const { portfolioData, targetTickers } = await request.json();
     
@@ -27,26 +65,20 @@ export async function POST(request: Request) {
     }
 
     const uniqueTickers = Array.from(new Set(targetTickers));
-    console.log(`[CORRELATION] Scanning ${uniqueTickers.length} tickers...`);
-
     const start = new Date(portfolioData[0].date);
     const end = new Date(portfolioData[portfolioData.length-1].date);
     end.setDate(end.getDate() + 2);
 
     const results: any[] = [];
 
-    // SEQUENTIAL FETCH WITH 300ms DELAY TO PREVENT RATE LIMITING
+    // Sequential fetch with 300ms anti-spam delay
     for (const ticker of uniqueTickers) {
       try {
-         console.log(`[CORRELATION] Fetching history for ${ticker}...`);
          const hist = await yahooFinance.historical(ticker as string, { period1: start, period2: end });
          results.push({ ticker, hist });
-      } catch (err: any) {
-         console.warn(`[CORRELATION] Failed to fetch ${ticker}: ${err.message}`);
-         results.push({ ticker, hist: null }); // Store null so we know it failed, but keep loop going
+      } catch (err) {
+         results.push({ ticker, hist: null }); 
       }
-      
-      // Pause for 300ms to bypass Yahoo anti-spam filters
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
@@ -65,7 +97,6 @@ export async function POST(request: Request) {
         const candPrices: number[] = [];
         const portAligned: number[] = [];
 
-        // Align the dates perfectly (skipping weekends/holidays naturally)
         portfolioData.forEach((pd: any) => {
             const d = new Date(pd.date).toISOString().split('T')[0];
             if(dateToPrice[d]) {
@@ -90,12 +121,9 @@ export async function POST(request: Request) {
     }
 
     correlations.sort((a,b) => b.correlation - a.correlation);
-    console.log(`[CORRELATION] Successfully calculated ${correlations.length} matches.`);
-    
     return NextResponse.json({ topCorrelations: correlations });
 
   } catch (error: any) {
-    console.error('[CORRELATION API ERROR]:', error.message || error);
     return NextResponse.json({ error: 'Failed to calculate correlation.' }, { status: 500 });
   }
 }
