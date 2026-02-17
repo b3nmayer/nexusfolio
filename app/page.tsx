@@ -1,5 +1,5 @@
 "use client";
-
+import './globals.css';
 import React, { useState, useMemo } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
