@@ -1,4 +1,3 @@
-// app/api/stock/route.ts
 import { NextResponse } from 'next/server';
 import yahooFinance from 'yahoo-finance2';
 
@@ -16,14 +15,16 @@ export async function GET(request: Request) {
     const period1 = new Date();
     period1.setDate(period1.getDate() - days);
     
-    // Fetch historical daily data from Yahoo Finance
-    const result = await yahooFinance.historical(ticker, {
+    // Fetch historical daily data from Yahoo Finance 
+    // We cast to `any[]` here to satisfy strict TypeScript checks during Vercel builds
+    const result = (await yahooFinance.historical(ticker, {
       period1: period1,
       interval: '1d',
-    });
+    })) as any[];
 
     // Format data specifically for ApexCharts: { x: timestamp, y: [O, H, L, C] }
-    const formattedData = result.map((quote) => ({
+    // We also explicitly type `quote` as `any`
+    const formattedData = result.map((quote: any) => ({
       x: quote.date.getTime(),
       y: [
         Number(quote.open.toFixed(2)),
