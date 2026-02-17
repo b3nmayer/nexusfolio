@@ -54,10 +54,29 @@ export default function PortfolioAnalyzer() {
       setNewPortfolioTicker("");
       return; 
     }
-    fetchDataForTickers([ticker], 1825);
-    const newWeight = portfolio.length === 0 ? 100 : 0;
-    setPortfolio([...portfolio, { ticker, weight: newWeight }]);
-    setNewPortfolioTicker("");
+    const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
+    setIsLoading(true);
+    const newData: Record<string, any[]> = { ...stockData };
+    try {
+      // Fetch sequentially to prevent Yahoo Finance rate-limiting
+      for (const ticker of tickers) {
+        if (!newData[ticker]) {
+          const res = await fetch(`/api/stock?ticker=${ticker}&days=${days}`);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(`Rejected ticker '${ticker}': ${errorData.error || 'Server error'}`);
+          }
+          const json = await res.json();
+          newData[ticker] = json.data;
+        }
+      }
+      setStockData(newData);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Data Sync Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const fetchDataForTickers = async (tickers: string[], days: number = 1825) => {
