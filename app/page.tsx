@@ -42,10 +42,6 @@ export default function NexusFolio() {
 
   const [showSMA, setShowSMA] = useState({ 20: false, 50: false, 200: false });
 
-  const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
-  const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
-  const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
-
   // --- BROWSER AUTO-SAVE ---
   useEffect(() => {
     const savedPortfolio = localStorage.getItem('nexusFolio_portfolio');
@@ -84,9 +80,7 @@ export default function NexusFolio() {
     setCompareTickers([]);
     setNewCompareTicker("");
     setNewPortfolioTicker("");
-    setTopCorrelations([]);
     setTimeframe(180);
-    setCorrTimeframe(90);
     setShowSMA({ 20: false, 50: false, 200: false });
     localStorage.removeItem('nexusFolio_portfolio');
   };
@@ -369,12 +363,6 @@ export default function NexusFolio() {
     return { chartSeries: series, portfolioStats: stats, compareStats: cStats, individualPerformance: indPerf as any[], topCorrelations: topCorrs };
   }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA]);
 
-  const fetchCorrelations = async () => {
-    // Left empty since it now calculates instantly on the frontend inside useMemo
-    setIsCalculatingCorr(true);
-    setTimeout(() => setIsCalculatingCorr(false), 500); 
-  };
-
   const externalBenchmarks = useMemo(() => {
     return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
   }, [portfolio]);
@@ -513,234 +501,4 @@ export default function NexusFolio() {
           <div className="bg-zinc-900/40 border border-zinc-800/50 p-2 pl-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between shadow-lg shrink-0">
             <div className="flex gap-2 items-center flex-wrap">
               <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl">
-                {[ {label: '1M', val: 30}, {label: '3M', val: 90}, {label: '6M', val: 180}, {label: 'YTD', val: 'YTD'}, {label: '1Y', val: 365}, {label: 'Custom', val: 'CUSTOM'} ].map(tf => (
-                  <button 
-                    key={tf.label} onClick={() => setTimeframe(tf.val as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${timeframe === tf.val ? 'bg-zinc-800 text-cyan-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
-                  >
-                    {tf.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex gap-1 p-1 bg-zinc-950/50 border border-zinc-800/50 rounded-xl hidden md:flex">
-                 {[20, 50, 200].map(days => (
-                   <button
-                      key={days}
-                      onClick={() => setShowSMA(prev => ({...prev, [days]: !prev[days as keyof typeof prev]}))}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1 ${showSMA[days as keyof typeof showSMA] ? 'bg-zinc-800 text-cyan-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
-                   >
-                      <ActivitySquare size={12} /> SMA {days}
-                   </button>
-                 ))}
-              </div>
-
-              {timeframe === 'CUSTOM' && (
-                <div className="flex items-center gap-2 bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-1 px-3">
-                  <Calendar size={14} className="text-zinc-500" />
-                  <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
-                  <span className="text-zinc-600">-</span>
-                  <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 pr-2">
-              <div className="relative">
-                <input 
-                  type="text" placeholder="Compare (e.g. SPY)" value={newCompareTicker}
-                  onChange={(e) => setNewCompareTicker(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addCompareTicker()}
-                  className="bg-zinc-950 border border-zinc-800/80 rounded-xl pl-3 pr-8 py-1.5 w-36 text-xs text-zinc-200 focus:ring-1 focus:ring-cyan-500/50 uppercase"
-                />
-                <button onClick={addCompareTicker} disabled={isLoading} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-cyan-400 transition-colors disabled:opacity-50">
-                  <Plus size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {compareTickers.length > 0 && (
-            <div className="flex gap-2 flex-wrap px-1 shrink-0">
-              {compareTickers.map(ticker => (
-                <span key={ticker} className="flex items-center gap-1.5 px-3 py-1 bg-zinc-800/50 border border-zinc-700/50 rounded-full text-xs font-medium text-zinc-300">
-                  {ticker}
-                  <X size={12} className="cursor-pointer text-zinc-500 hover:text-rose-400" onClick={() => removeCompareTicker(ticker)} />
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* MAIN DASHBOARD LAYOUT */}
-          <div className="flex flex-col lg:flex-row gap-6">
-            
-            {/* Chart Area */}
-            <div className="flex-1 bg-zinc-900/40 border border-zinc-800/50 rounded-3xl shadow-xl min-h-[400px] flex flex-col relative overflow-hidden">
-              
-              {/* NEW: UPGRADED PERFORMANCE OVERLAY BADGES */}
-              {portfolioStats && (
-                <div className="absolute top-6 left-6 z-10">
-                  <h3 className="text-sm font-medium text-zinc-400 mb-2">Performance Analysis (NAV Index)</h3>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {/* Fund Badge */}
-                    <div className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-zinc-800">
-                      <span className="text-zinc-400 text-xs font-semibold">FUND</span>
-                      <span className={`text-sm font-bold ${portfolioStats.perc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {portfolioStats.perc >= 0 ? '+' : ''}{portfolioStats.perc.toFixed(2)}%
-                      </span>
-                    </div>
-                    {/* Compare Tickers Badges */}
-                    {compareStats?.map(c => (
-                      <div key={c.ticker} className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-zinc-800">
-                        <span className="text-zinc-400 text-xs font-semibold">{c.ticker}</span>
-                        <span className={`text-sm font-bold ${c.perc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {c.perc >= 0 ? '+' : ''}{c.perc.toFixed(2)}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {isLoading && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center flex-col gap-4 bg-zinc-950/40 backdrop-blur-sm">
-                  <Loader2 className="animate-spin text-cyan-400" size={36} />
-                  <p className="text-zinc-400 font-medium text-sm">Syncing Data...</p>
-                </div>
-              )}
-              
-              {portfolio.length === 0 ? (
-                <div className="h-full flex items-center justify-center flex-col gap-4 text-zinc-600">
-                  <Activity size={32} className="text-zinc-500 opacity-50" />
-                  <p className="text-sm">Add a ticker to initialize NexusFolio.</p>
-                </div>
-              ) : (
-                <div className="h-full w-full p-4 pt-28">
-                  {typeof window !== 'undefined' && (
-                    <Chart options={chartOptions} series={chartSeries} type={chartType === 'candlestick' ? 'candlestick' : 'line'} height="100%" />
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT COLUMN STATS & TOP/BOTTOM PANELS */}
-            {portfolioStats && (
-              <div className="w-full lg:w-[340px] flex flex-col gap-6 shrink-0">
-                <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
-                  <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Portfolio Stats</h3>
-                  <div className="flex flex-col gap-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-zinc-500">Return (Timeframe)</span>
-                      <span className={`text-sm font-medium ${portfolioStats.perc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {portfolioStats.perc >= 0 ? '+' : ''}{portfolioStats.perc.toFixed(2)}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-zinc-500">Max Drawdown</span>
-                      <span className="text-sm font-medium text-rose-400">-{portfolioStats.maxDrawdown.toFixed(2)}%</span>
-                    </div>
-                  </div>
-                </div>
-
-                {individualPerformance.length > 0 && (
-                  <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
-                    <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Top Performers</h3>
-                    <div className="flex flex-col gap-3">
-                      {individualPerformance.slice(0, 5).map(t => (
-                        <div key={t.ticker} className="flex items-center justify-between text-sm">
-                          <span className="font-bold text-zinc-200">{t.ticker}</span>
-                          <span className="text-zinc-500 text-xs hidden sm:block">${t.endPrice.toFixed(2)}</span>
-                          <span className={`font-medium text-right ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {individualPerformance.length > 0 && (
-                  <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
-                    <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Underperformers</h3>
-                    <div className="flex flex-col gap-3">
-                      {[...individualPerformance].reverse().slice(0, 5).map(t => (
-                        <div key={t.ticker} className="flex items-center justify-between text-sm">
-                          <span className="font-bold text-zinc-200">{t.ticker}</span>
-                          <span className="text-zinc-500 text-xs hidden sm:block">${t.endPrice.toFixed(2)}</span>
-                          <span className={`font-medium text-right ${t.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {t.change >= 0 ? '+' : ''}{t.change.toFixed(2)}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* STATIC CORRELATION ENGINE PANEL */}
-          {portfolio.length > 0 && (
-            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
-               <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex flex-col">
-                    <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
-                      <Network className="w-5 h-5 text-cyan-400" /> Static Correlation Engine
-                    </h3>
-                    <p className="text-xs text-zinc-500 mt-1">Automatically calculates portfolio correlation over your selected visual timeframe.</p>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <select 
-                      value={corrTimeframe} 
-                      onChange={(e) => setCorrTimeframe(e.target.value === 'YTD' ? 'YTD' : Number(e.target.value))}
-                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 appearance-none cursor-pointer"
-                    >
-                      <option value={7}>Last 1 Week</option>
-                      <option value={30}>Last 1 Month</option>
-                      <option value={90}>Last 3 Months</option>
-                      <option value={180}>Last 6 Months</option>
-                      <option value="YTD">YTD</option>
-                      <option value={365}>Last 1 Year</option>
-                      <option value={1095}>Last 3 Years</option>
-                    </select>
-
-                    <button 
-                      onClick={fetchCorrelations} 
-                      disabled={isCalculatingCorr}
-                      className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-zinc-950 font-bold rounded-xl hover:bg-cyan-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(34,211,238,0.3)] min-w-[140px] justify-center"
-                    >
-                      {isCalculatingCorr ? <Loader2 size={16} className="animate-spin text-zinc-950" /> : <Search size={16} className="text-zinc-950" />}
-                      {isCalculatingCorr ? "Scanning..." : "Scan Market"}
-                    </button>
-                  </div>
-               </div>
-
-               {topCorrelations.length > 0 && (
-                 <>
-                   <div className="flex flex-wrap gap-3 mt-2">
-                      {topCorrelations.map((c, i) => (
-                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1 hover:border-cyan-500/30 transition-colors">
-                          <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
-                          <span className="text-cyan-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
-                        </div>
-                      ))}
-                   </div>
-                   
-                   {externalBenchmarks.length > 0 && (
-                     <div className="mt-2 text-xs text-zinc-500/80 flex items-center gap-1.5 border-t border-zinc-800/50 pt-3">
-                       <Info size={14} className="text-zinc-400 shrink-0" />
-                       <span>Also evaluating benchmark ETFs: <span className="text-zinc-400">{externalBenchmarks.join(', ')}</span></span>
-                     </div>
-                   )}
-                 </>
-               )}
-            </div>
-          )}
-
-        </div>
-      </div>
-    </div>
-  );
-}
+                {[ {label: '1M', val: 30}, {label: '3M', val: 90}, {label: '6M', val: 180}, {label: 'YTD', val: '
