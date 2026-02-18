@@ -3,11 +3,26 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
-import { Upload, Plus, BarChart2, TrendingUp, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare, RotateCcw, Info } from 'lucide-react';
+import { Upload, Plus, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare, RotateCcw, Info, TrendingUp } from 'lucide-react';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 const BASE_BENCHMARKS = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
+
+// Frontend Math Helper for Rolling Stats
+function getPearson(x: number[], y: number[]) {
+  const n = x.length;
+  if (n === 0) return 0;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  for(let i=0; i<n; i++) {
+    sumX += x[i]; sumY += y[i];
+    sumXY += x[i]*y[i];
+    sumX2 += x[i]*x[i]; sumY2 += y[i]*y[i];
+  }
+  const num = (n * sumXY) - (sumX * sumY);
+  const den = Math.sqrt(((n * sumX2) - (sumX * sumX)) * ((n * sumY2) - (sumY * sumY)));
+  return den === 0 ? 0 : num / den;
+}
 
 export default function NexusFolio() {
   const [portfolio, setPortfolio] = useState<{ ticker: string, weight: number }[]>([]);
@@ -30,6 +45,9 @@ export default function NexusFolio() {
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
   const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
   const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
+  
+  // Rolling Correlation State
+  const [rollingBenchmark, setRollingBenchmark] = useState<string>('SPY');
 
   // --- BROWSER AUTO-SAVE ---
   useEffect(() => {
@@ -58,6 +76,8 @@ export default function NexusFolio() {
   useEffect(() => {
     if (hasLoadedStorage && portfolio.length > 0 && Object.keys(stockData).length === 0) {
       const tickers = portfolio.map(p => p.ticker);
+      // Automatically fetch SPY for the rolling correlation baseline
+      if (!tickers.includes('SPY')) tickers.push('SPY');
       fetchDataForTickers(tickers, 1825);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,7 +120,6 @@ export default function NexusFolio() {
     }
   };
 
-  // --- UPDATED CSV IMPORT LOGIC ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -132,7 +151,7 @@ export default function NexusFolio() {
         });
 
         setPortfolio(newPortfolio);
-        fetchDataForTickers([...tickers, ...compareTickers], 1825);
+        fetchDataForTickers([...tickers, ...compareTickers, 'SPY'], 1825);
       }
     });
   };
@@ -176,8 +195,8 @@ export default function NexusFolio() {
   };
 
   // --- ADVANCED MATH ENGINE ---
-  const { chartSeries, aggregateRawData, portfolioStats, individualPerformance } = useMemo(() => {
-    if (portfolio.length === 0) return { chartSeries: [], aggregateRawData: [], portfolioStats: null, individualPerformance: [] };
+  const { chartSeries, aggregateRawData, portfolioStats, individualPerformance, rollingSeries } = useMemo(() => {
+    if (portfolio.length === 0) return { chartSeries: [], aggregateRawData: [], portfolioStats: null, individualPerformance: [], rollingSeries: [] };
 
     let startTime = 0;
     let endTime = new Date().getTime();
@@ -298,8 +317,57 @@ export default function NexusFolio() {
       };
     }).filter(Boolean).sort((a: any, b: any) => b.change - a.change);
 
-    return { chartSeries: series, aggregateRawData: rawDailyData, portfolioStats: stats, individualPerformance: indPerf as any[] };
-  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA]);
+    // --- DYNAMIC ROLLING MATH (30-DAY) ---
+    const rollSeries: any[] = [];
+    if (rawDailyData.length > 30 && stockData[rollingBenchmark]) {
+      const bData = stockData[rollingBenchmark];
+      const bMap = new Map(bData.map(d => [d.x, d.y[3]])); // map date to close price
+      
+      const alignedReturns: { date: number, pRet: number, bRet: number }[] = [];
+      
+      // Calculate daily returns for both arrays
+      for(let i = 1; i < rawDailyData.length; i++) {
+        const date = rawDailyData[i].date;
+        const pClose = rawDailyData[i].price;
+        const pPrev = rawDailyData[i-1].price;
+        const bClose = bMap.get(date);
+        const bPrev = bMap.get(rawDailyData[i-1].date);
+        
+        if (bClose !== undefined && bPrev !== undefined) {
+          alignedReturns.push({
+            date: date,
+            pRet: (pClose - pPrev) / pPrev,
+            bRet: (bClose - bPrev) / bPrev
+          });
+        }
+      }
+
+      const rollCorrData = [];
+      const rollVolData = [];
+      const windowSize = 30;
+
+      for (let i = windowSize; i < alignedReturns.length; i++) {
+        const slice = alignedReturns.slice(i - windowSize, i);
+        const pRets = slice.map(s => s.pRet);
+        const bRets = slice.map(s => s.bRet);
+        
+        // 1. Calculate Rolling Pearson Correlation
+        const corr = getPearson(pRets, bRets);
+        rollCorrData.push({ x: alignedReturns[i].date, y: parseFloat(corr.toFixed(2)) });
+
+        // 2. Calculate Rolling Annualized Volatility (HV)
+        const meanRet = pRets.reduce((a,b) => a+b, 0) / windowSize;
+        const variance = pRets.reduce((a,b) => a + Math.pow(b - meanRet, 2), 0) / windowSize;
+        const vol = Math.sqrt(variance) * Math.sqrt(252) * 100;
+        rollVolData.push({ x: alignedReturns[i].date, y: parseFloat(vol.toFixed(2)) });
+      }
+
+      rollSeries.push({ name: `Correlation vs ${rollingBenchmark}`, type: 'line', data: rollCorrData });
+      rollSeries.push({ name: 'Historical Volatility (Ann. %)', type: 'line', data: rollVolData });
+    }
+
+    return { chartSeries: series, aggregateRawData: rawDailyData, portfolioStats: stats, individualPerformance: indPerf as any[], rollingSeries: rollSeries };
+  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA, rollingBenchmark]);
 
   // CORRELATION LOGIC
   const fetchCorrelations = async () => {
@@ -396,6 +464,28 @@ export default function NexusFolio() {
       }
     },
     noData: { text: '' }
+  };
+
+  const rollingChartOptions: any = {
+    ...chartOptions,
+    stroke: { width: 2, curve: 'smooth' },
+    colors: ['#a78bfa', '#fb7185'], // Purple for Correlation, Rose for Volatility
+    yaxis: [
+      { 
+        title: { text: 'Correlation (1.0 to -1.0)', style: { color: '#a78bfa', fontWeight: 500 } },
+        labels: { style: { colors: '#a78bfa' } },
+        max: 1, min: -1, tickAmount: 4
+      },
+      { 
+        opposite: true, 
+        title: { text: 'Volatility (%)', style: { color: '#fb7185', fontWeight: 500 } },
+        labels: { formatter: (val: number) => `${val.toFixed(0)}%`, style: { colors: '#fb7185' } }
+      }
+    ],
+    tooltip: {
+      theme: 'dark', shared: true, intersect: false,
+      y: { formatter: function (value: number) { return value.toFixed(2); } }
+    }
   };
 
   return (
@@ -524,15 +614,6 @@ export default function NexusFolio() {
                    </button>
                  ))}
               </div>
-
-              {timeframe === 'CUSTOM' && (
-                <div className="flex items-center gap-2 bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-1 px-3">
-                  <Calendar size={14} className="text-zinc-500" />
-                  <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
-                  <span className="text-zinc-600">-</span>
-                  <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
-                </div>
-              )}
             </div>
 
             <div className="flex items-center gap-2 pr-2">
@@ -561,7 +642,7 @@ export default function NexusFolio() {
             </div>
           )}
 
-          {/* MAIN DASHBOARD LAYOUT: Chart on Left, ALL Stats on Right */}
+          {/* MAIN DASHBOARD LAYOUT */}
           <div className="flex flex-col lg:flex-row gap-6">
             
             {/* Chart Area */}
@@ -602,8 +683,6 @@ export default function NexusFolio() {
             {/* RIGHT COLUMN STATS & TOP/BOTTOM PANELS */}
             {portfolioStats && (
               <div className="w-full lg:w-[340px] flex flex-col gap-6 shrink-0">
-                
-                {/* 1. Portfolio Stats Table */}
                 <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-6 shadow-xl flex flex-col gap-5">
                   <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Portfolio Stats</h3>
                   <div className="flex flex-col gap-4">
@@ -620,7 +699,6 @@ export default function NexusFolio() {
                   </div>
                 </div>
 
-                {/* 2. Top Performers */}
                 {individualPerformance.length > 0 && (
                   <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
                     <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Top Performers</h3>
@@ -638,7 +716,6 @@ export default function NexusFolio() {
                   </div>
                 )}
 
-                {/* 3. Underperformers */}
                 {individualPerformance.length > 0 && (
                   <div className="bg-zinc-900/40 border border-zinc-800/50 rounded-3xl p-5 shadow-xl flex flex-col gap-4">
                     <h3 className="text-sm font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Underperformers</h3>
@@ -655,21 +732,54 @@ export default function NexusFolio() {
                     </div>
                   </div>
                 )}
-
               </div>
             )}
           </div>
 
-          {/* CORRELATION ENGINE PANEL */}
+          {/* DYNAMIC RISK & ROLLING CORRELATION PANEL (NEW) */}
+          {portfolio.length > 0 && rollingSeries.length > 0 && (
+            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
+               <div className="absolute left-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 relative z-10">
+                  <div className="flex flex-col">
+                    <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-rose-400" /> Dynamic Risk & Volatility
+                    </h3>
+                    <p className="text-xs text-zinc-500 mt-1">30-Day Rolling Pearson Correlation vs {rollingBenchmark} & Historical Volatility</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">Benchmark:</span>
+                    <select 
+                      value={rollingBenchmark} 
+                      onChange={(e) => {
+                        setRollingBenchmark(e.target.value);
+                        if (!stockData[e.target.value]) fetchDataForTickers([e.target.value], 1825);
+                      }}
+                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-1.5 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-rose-500/50 appearance-none cursor-pointer"
+                    >
+                      {BASE_BENCHMARKS.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+               </div>
+               
+               <div className="h-[250px] w-full relative z-10">
+                  {typeof window !== 'undefined' && (
+                    <Chart options={rollingChartOptions} series={rollingSeries} type="line" height="100%" />
+                  )}
+               </div>
+            </div>
+          )}
+
+          {/* STATIC CORRELATION ENGINE PANEL */}
           {portfolio.length > 0 && (
             <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
                <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex flex-col">
                     <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
-                      <Network className="w-5 h-5 text-cyan-400" /> Correlation Engine
+                      <Network className="w-5 h-5 text-cyan-400" /> Static Correlation Engine
                     </h3>
-                    <p className="text-xs text-zinc-500 mt-1">Calculates portfolio correlation against its holdings and key ETFs.</p>
+                    <p className="text-xs text-zinc-500 mt-1">Calculates overall portfolio correlation against its holdings and key ETFs.</p>
                   </div>
                   
                   <div className="flex items-center gap-3">
