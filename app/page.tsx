@@ -9,7 +9,7 @@ const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 const BASE_BENCHMARKS = ['QQQ', 'SPY', 'IWM', 'ARKK', 'ARKW', 'IGV'];
 
-// Frontend Math Helper for Rolling Stats
+// Frontend Math Helper for Rolling Stats (Pearson Correlation)
 function getPearson(x: number[], y: number[]) {
   const n = x.length;
   if (n === 0) return 0;
@@ -76,7 +76,6 @@ export default function NexusFolio() {
   useEffect(() => {
     if (hasLoadedStorage && portfolio.length > 0 && Object.keys(stockData).length === 0) {
       const tickers = portfolio.map(p => p.ticker);
-      // Automatically fetch SPY for the rolling correlation baseline
       if (!tickers.includes('SPY')) tickers.push('SPY');
       fetchDataForTickers(tickers, 1825);
     }
@@ -282,7 +281,6 @@ export default function NexusFolio() {
       }
     });
 
-    // --- Calculate Advanced Stats ---
     let stats = null;
     if (rawDailyData.length > 0) {
       const startPrice = rawDailyData[0].price;
@@ -302,7 +300,6 @@ export default function NexusFolio() {
       stats = { startPrice, endPrice, perc, maxDrawdown: maxDrawdown * 100 };
     }
 
-    // --- Calculate Individual Ticker Performance ---
     const indPerf = portfolio.map(p => {
       const data = stockData[p.ticker] || [];
       const filtered = data.filter(d => d.x >= startTime && d.x <= endTime);
@@ -321,11 +318,10 @@ export default function NexusFolio() {
     const rollSeries: any[] = [];
     if (rawDailyData.length > 30 && stockData[rollingBenchmark]) {
       const bData = stockData[rollingBenchmark];
-      const bMap = new Map(bData.map(d => [d.x, d.y[3]])); // map date to close price
+      const bMap = new Map(bData.map(d => [d.x, d.y[3]])); 
       
       const alignedReturns: { date: number, pRet: number, bRet: number }[] = [];
       
-      // Calculate daily returns for both arrays
       for(let i = 1; i < rawDailyData.length; i++) {
         const date = rawDailyData[i].date;
         const pClose = rawDailyData[i].price;
@@ -351,19 +347,17 @@ export default function NexusFolio() {
         const pRets = slice.map(s => s.pRet);
         const bRets = slice.map(s => s.bRet);
         
-        // 1. Calculate Rolling Pearson Correlation
         const corr = getPearson(pRets, bRets);
         rollCorrData.push({ x: alignedReturns[i].date, y: parseFloat(corr.toFixed(2)) });
 
-        // 2. Calculate Rolling Annualized Volatility (HV)
         const meanRet = pRets.reduce((a,b) => a+b, 0) / windowSize;
         const variance = pRets.reduce((a,b) => a + Math.pow(b - meanRet, 2), 0) / windowSize;
         const vol = Math.sqrt(variance) * Math.sqrt(252) * 100;
         rollVolData.push({ x: alignedReturns[i].date, y: parseFloat(vol.toFixed(2)) });
       }
 
-      rollSeries.push({ name: `Correlation vs ${rollingBenchmark}`, type: 'line', data: rollCorrData });
-      rollSeries.push({ name: 'Historical Volatility (Ann. %)', type: 'line', data: rollVolData });
+      rollSeries.push({ name: `Pearson Correlation vs ${rollingBenchmark}`, type: 'line', data: rollCorrData });
+      rollSeries.push({ name: 'Volatility (IV Proxy %)', type: 'line', data: rollVolData });
     }
 
     return { chartSeries: series, aggregateRawData: rawDailyData, portfolioStats: stats, individualPerformance: indPerf as any[], rollingSeries: rollSeries };
@@ -437,6 +431,11 @@ export default function NexusFolio() {
     return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
   }, [portfolio]);
 
+  // Derived list of ALL available tickers for the Dynamic Risk dropdown
+  const allAvailableTickers = useMemo(() => {
+    return Array.from(new Set([...portfolio.map(p => p.ticker), ...BASE_BENCHMARKS]));
+  }, [portfolio]);
+
   // --- CHART OPTIONS ---
   const chartOptions: any = {
     theme: { mode: 'dark' },
@@ -472,13 +471,13 @@ export default function NexusFolio() {
     colors: ['#a78bfa', '#fb7185'], // Purple for Correlation, Rose for Volatility
     yaxis: [
       { 
-        title: { text: 'Correlation (1.0 to -1.0)', style: { color: '#a78bfa', fontWeight: 500 } },
+        title: { text: 'Pearson Correlation', style: { color: '#a78bfa', fontWeight: 500 } },
         labels: { style: { colors: '#a78bfa' } },
         max: 1, min: -1, tickAmount: 4
       },
       { 
         opposite: true, 
-        title: { text: 'Volatility (%)', style: { color: '#fb7185', fontWeight: 500 } },
+        title: { text: 'Volatility (IV Proxy %)', style: { color: '#fb7185', fontWeight: 500 } },
         labels: { formatter: (val: number) => `${val.toFixed(0)}%`, style: { colors: '#fb7185' } }
       }
     ],
@@ -614,6 +613,15 @@ export default function NexusFolio() {
                    </button>
                  ))}
               </div>
+
+              {timeframe === 'CUSTOM' && (
+                <div className="flex items-center gap-2 bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-1 px-3">
+                  <Calendar size={14} className="text-zinc-500" />
+                  <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
+                  <span className="text-zinc-600">-</span>
+                  <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)} className="bg-transparent text-xs text-zinc-300 focus:outline-none [color-scheme:dark]" />
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 pr-2">
@@ -736,41 +744,7 @@ export default function NexusFolio() {
             )}
           </div>
 
-          {/* DYNAMIC RISK & ROLLING CORRELATION PANEL (NEW) */}
-          {portfolio.length > 0 && rollingSeries.length > 0 && (
-            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
-               <div className="absolute left-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
-               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 relative z-10">
-                  <div className="flex flex-col">
-                    <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-rose-400" /> Dynamic Risk & Volatility
-                    </h3>
-                    <p className="text-xs text-zinc-500 mt-1">30-Day Rolling Pearson Correlation vs {rollingBenchmark} & Historical Volatility</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-500">Benchmark:</span>
-                    <select 
-                      value={rollingBenchmark} 
-                      onChange={(e) => {
-                        setRollingBenchmark(e.target.value);
-                        if (!stockData[e.target.value]) fetchDataForTickers([e.target.value], 1825);
-                      }}
-                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-1.5 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-rose-500/50 appearance-none cursor-pointer"
-                    >
-                      {BASE_BENCHMARKS.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-               </div>
-               
-               <div className="h-[250px] w-full relative z-10">
-                  {typeof window !== 'undefined' && (
-                    <Chart options={rollingChartOptions} series={rollingSeries} type="line" height="100%" />
-                  )}
-               </div>
-            </div>
-          )}
-
-          {/* STATIC CORRELATION ENGINE PANEL */}
+          {/* STATIC CORRELATION ENGINE PANEL (MOVED UP) */}
           {portfolio.length > 0 && (
             <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
                <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -827,6 +801,41 @@ export default function NexusFolio() {
                    )}
                  </>
                )}
+            </div>
+          )}
+
+          {/* DYNAMIC RISK & ROLLING CORRELATION PANEL (MOVED DOWN) */}
+          {portfolio.length > 0 && rollingSeries.length > 0 && (
+            <div className="bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-3xl shadow-xl flex flex-col gap-4 relative overflow-hidden shrink-0 mt-2">
+               <div className="absolute left-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 relative z-10">
+                  <div className="flex flex-col">
+                    <h3 className="text-lg font-medium text-zinc-200 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-rose-400" /> Dynamic Risk & Volatility
+                    </h3>
+                    <p className="text-xs text-zinc-500 mt-1">30-Day Rolling Pearson Correlation vs {rollingBenchmark} & Historical Volatility</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">Benchmark:</span>
+                    <select 
+                      value={rollingBenchmark} 
+                      onChange={(e) => {
+                        setRollingBenchmark(e.target.value);
+                        if (!stockData[e.target.value]) fetchDataForTickers([e.target.value], 1825);
+                      }}
+                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-1.5 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-rose-500/50 appearance-none cursor-pointer"
+                    >
+                      {/* NOW USES ALL AVAILABLE TICKERS INSTEAD OF JUST BASE_BENCHMARKS */}
+                      {allAvailableTickers.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+               </div>
+               
+               <div className="h-[250px] w-full relative z-10">
+                  {typeof window !== 'undefined' && (
+                    <Chart options={rollingChartOptions} series={rollingSeries} type="line" height="100%" />
+                  )}
+               </div>
             </div>
           )}
 
