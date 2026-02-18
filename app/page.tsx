@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import dynamic from 'next/dynamic';
-import { Upload, Plus, X, Loader2, Activity, PieChart, Calendar, Network, Search, ActivitySquare, RotateCcw, Info } from 'lucide-react';
+import { Upload, Plus, X, Loader2, Activity, PieChart, Calendar, Network, ActivitySquare, RotateCcw, Info } from 'lucide-react';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
@@ -34,6 +34,7 @@ export default function NexusFolio() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   
+  // Single Unified Timeframe State
   const [timeframe, setTimeframe] = useState<number | 'YTD' | 'CUSTOM'>(180);
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0];
@@ -41,10 +42,6 @@ export default function NexusFolio() {
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [showSMA, setShowSMA] = useState({ 20: false, 50: false, 200: false });
-
-  const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
-  const [topCorrelations, setTopCorrelations] = useState<{ticker: string, correlation: number}[]>([]);
-  const [corrTimeframe, setCorrTimeframe] = useState<number | 'YTD'>(90);
 
   // --- BROWSER AUTO-SAVE ---
   useEffect(() => {
@@ -84,9 +81,7 @@ export default function NexusFolio() {
     setCompareTickers([]);
     setNewCompareTicker("");
     setNewPortfolioTicker("");
-    setTopCorrelations([]);
     setTimeframe(180);
-    setCorrTimeframe(90);
     setShowSMA({ 20: false, 50: false, 200: false });
     localStorage.removeItem('nexusFolio_portfolio');
   };
@@ -368,11 +363,6 @@ export default function NexusFolio() {
 
     return { chartSeries: series, portfolioStats: stats, compareStats: cStats, individualPerformance: indPerf as any[], topCorrelations: topCorrs };
   }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA]);
-
-  const fetchCorrelations = async () => {
-    setIsCalculatingCorr(true);
-    setTimeout(() => setIsCalculatingCorr(false), 500); 
-  };
 
   const externalBenchmarks = useMemo(() => {
     return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
@@ -686,31 +676,6 @@ export default function NexusFolio() {
                       <Network className="w-5 h-5 text-cyan-400" /> Static Correlation Engine
                     </h3>
                     <p className="text-xs text-zinc-500 mt-1">Automatically calculates portfolio correlation over your selected visual timeframe.</p>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <select 
-                      value={corrTimeframe} 
-                      onChange={(e) => setCorrTimeframe(e.target.value === 'YTD' ? 'YTD' : Number(e.target.value))}
-                      className="bg-zinc-950 border border-zinc-800/80 rounded-xl px-3 py-2 text-xs font-medium text-zinc-300 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 appearance-none cursor-pointer"
-                    >
-                      <option value={7}>Last 1 Week</option>
-                      <option value={30}>Last 1 Month</option>
-                      <option value={90}>Last 3 Months</option>
-                      <option value={180}>Last 6 Months</option>
-                      <option value="YTD">YTD</option>
-                      <option value={365}>Last 1 Year</option>
-                      <option value={1095}>Last 3 Years</option>
-                    </select>
-
-                    <button 
-                      onClick={fetchCorrelations} 
-                      disabled={isCalculatingCorr}
-                      className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-zinc-950 font-bold rounded-xl hover:bg-cyan-400 transition-colors disabled:opacity-50 shadow-[0_0_20px_rgba(34,211,238,0.3)] min-w-[140px] justify-center"
-                    >
-                      {isCalculatingCorr ? <Loader2 size={16} className="animate-spin text-zinc-950" /> : <Search size={16} className="text-zinc-950" />}
-                      {isCalculatingCorr ? "Scanning..." : "Scan Market"}
-                    </button>
                   </div>
                </div>
 
