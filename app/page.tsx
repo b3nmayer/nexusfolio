@@ -24,6 +24,27 @@ function getPearson(x: number[], y: number[]) {
   return den === 0 ? 0 : num / den;
 }
 
+// NEW: Frontend Math Helper for Beta
+function getBeta(portfolioRets: number[], benchmarkRets: number[]) {
+  const n = portfolioRets.length;
+  if (n === 0) return 0;
+  let sumP = 0, sumB = 0;
+  for(let i=0; i<n; i++) {
+    sumP += portfolioRets[i];
+    sumB += benchmarkRets[i];
+  }
+  const meanP = sumP / n;
+  const meanB = sumB / n;
+  
+  let covariance = 0;
+  let varianceB = 0;
+  for(let i=0; i<n; i++) {
+    covariance += (portfolioRets[i] - meanP) * (benchmarkRets[i] - meanB);
+    varianceB += (benchmarkRets[i] - meanB) * (benchmarkRets[i] - meanB);
+  }
+  return varianceB === 0 ? 0 : covariance / varianceB;
+}
+
 export default function NexusFolio() {
   const [portfolio, setPortfolio] = useState<{ ticker: string, weight: number }[]>([]);
   const [stockData, setStockData] = useState<Record<string, any[]>>({});
@@ -34,7 +55,6 @@ export default function NexusFolio() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   
-  // Single Unified Timeframe State
   const [timeframe, setTimeframe] = useState<number | 'YTD' | 'CUSTOM'>(180);
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0];
@@ -186,7 +206,6 @@ export default function NexusFolio() {
     setCompareTickers(compareTickers.filter(t => t !== ticker));
   };
 
-  // --- REBUILT MATH ENGINE (INDEXED NAV) ---
   const { chartSeries, portfolioStats, compareStats, individualPerformance, topCorrelations } = useMemo(() => {
     if (portfolio.length === 0) return { chartSeries: [], portfolioStats: null, compareStats: [], individualPerformance: [], topCorrelations: [] };
 
@@ -328,7 +347,7 @@ export default function NexusFolio() {
       return { ticker: p.ticker, startPrice: sPrice, endPrice: ePrice, change: ((ePrice - sPrice) / sPrice) * 100 };
     }).filter(Boolean).sort((a: any, b: any) => b.change - a.change);
 
-    // INSTANT STATIC CORRELATION
+    // INSTANT STATIC CORRELATION & BETA
     const topCorrs: any[] = [];
     const targetTickers = Array.from(new Set([...portfolio.map(p => p.ticker), ...BASE_BENCHMARKS]));
 
@@ -356,7 +375,8 @@ export default function NexusFolio() {
         }
         if (pRets.length > 5) {
             const corr = getPearson(pRets, tRets);
-            if (!isNaN(corr)) topCorrs.push({ ticker, correlation: corr });
+            const beta = getBeta(pRets, tRets);
+            if (!isNaN(corr)) topCorrs.push({ ticker, correlation: corr, beta });
         }
     });
     topCorrs.sort((a, b) => b.correlation - a.correlation);
@@ -683,9 +703,13 @@ export default function NexusFolio() {
                  <>
                    <div className="flex flex-wrap gap-3 mt-2">
                       {topCorrelations.map((c, i) => (
-                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col gap-1 items-center justify-center relative group min-w-[100px] flex-1 hover:border-cyan-500/30 transition-colors">
+                        <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col items-center justify-center relative group min-w-[100px] flex-1 hover:border-cyan-500/30 transition-colors">
                           <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
                           <span className="text-cyan-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
+                          {/* BETA BADGE ADDED HERE */}
+                          <span className="text-zinc-500 text-[10px] mt-0.5 px-1.5 py-0.5 bg-zinc-900 rounded-md">
+                            Beta: {c.beta.toFixed(2)}
+                          </span>
                         </div>
                       ))}
                    </div>
