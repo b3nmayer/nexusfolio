@@ -4,7 +4,7 @@
 
 NexusFolio is a professional, Bloomberg-lite quantitative tracking dashboard built with Next.js. It goes beyond simple price tracking by calculating a true Base-100 Net Asset Value (NAV) Index for your custom portfolio, complete with dynamic timeframe syncing, technical indicators, and real-time Pearson correlation analysis.
 
-![NexusFolio Dashboard](https://via.placeholder.com/1000x500.png?text=NexusFolio+Dashboard) ## ✨ Key Features
+## ✨ Key Features
 
 ### 🧠 Advanced Math Engine
 * **True NAV Indexing**: Calculates portfolio performance using Indexed NAV (starting at Base 100) with weighted daily returns.
