@@ -24,7 +24,7 @@ function getPearson(x: number[], y: number[]) {
   return den === 0 ? 0 : num / den;
 }
 
-// NEW: Frontend Math Helper for Beta
+// Frontend Math Helper for Beta
 function getBeta(portfolioRets: number[], benchmarkRets: number[]) {
   const n = portfolioRets.length;
   if (n === 0) return 0;
@@ -62,6 +62,7 @@ export default function NexusFolio() {
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [showSMA, setShowSMA] = useState({ 20: false, 50: false, 200: false });
+  const [showBB, setShowBB] = useState(false); // New Bollinger Bands State
 
   // --- BROWSER AUTO-SAVE ---
   useEffect(() => {
@@ -103,6 +104,7 @@ export default function NexusFolio() {
     setNewPortfolioTicker("");
     setTimeframe(180);
     setShowSMA({ 20: false, 50: false, 200: false });
+    setShowBB(false);
     localStorage.removeItem('nexusFolio_portfolio');
   };
 
@@ -292,6 +294,33 @@ export default function NexusFolio() {
       }
     });
 
+    // Bollinger Bands
+    if (showBB) {
+      const upperData = [];
+      const lowerData = [];
+      for(let i = 0; i < fullAggData.length; i++) {
+        if (i >= 19) {
+          let sum = 0;
+          for(let j = 0; j < 20; j++) { sum += fullAggData[i - j].close; }
+          const mean = sum / 20;
+
+          let sumSq = 0;
+          for(let j = 0; j < 20; j++) { sumSq += Math.pow(fullAggData[i - j].close - mean, 2); }
+          const stdDev = Math.sqrt(sumSq / 20);
+
+          const upper = parseFloat((mean + 2 * stdDev).toFixed(2));
+          const lower = parseFloat((mean - 2 * stdDev).toFixed(2));
+
+          if (fullAggData[i].x >= startTime && fullAggData[i].x <= endTime) {
+            upperData.push({ x: fullAggData[i].x, y: upper });
+            lowerData.push({ x: fullAggData[i].x, y: lower });
+          }
+        }
+      }
+      series.push({ name: `BB Upper (20,2)`, type: 'line', data: upperData });
+      series.push({ name: `BB Lower (20,2)`, type: 'line', data: lowerData });
+    }
+
     // Normalized Comparisons
     const portfolioStartValue = aggregateData.length > 0 ? aggregateData[0].y : 0;
     compareTickers.forEach(ticker => {
@@ -382,7 +411,7 @@ export default function NexusFolio() {
     topCorrs.sort((a, b) => b.correlation - a.correlation);
 
     return { chartSeries: series, portfolioStats: stats, compareStats: cStats, individualPerformance: indPerf as any[], topCorrelations: topCorrs };
-  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA]);
+  }, [portfolio, stockData, compareTickers, chartType, timeframe, customStart, customEnd, showSMA, showBB]);
 
   const externalBenchmarks = useMemo(() => {
     return BASE_BENCHMARKS.filter(b => !portfolio.some(p => p.ticker === b));
@@ -396,7 +425,8 @@ export default function NexusFolio() {
     yaxis: { labels: { formatter: (value: number) => `$${value.toFixed(2)}`, style: { colors: '#71717a' } }, tooltip: { enabled: true } },
     grid: { borderColor: '#27272a', strokeDashArray: 4, xaxis: { lines: { show: true } }, yaxis: { lines: { show: true } } },
     stroke: { width: chartType === 'line' ? 2 : 1, curve: 'smooth' },
-    colors: ['#22d3ee', '#818cf8', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa'], 
+    // Expanded color palette to support Bollinger Bands and comparisons
+    colors: ['#22d3ee', '#818cf8', '#fb7185', '#fbbf24', '#a78bfa', '#f97316', '#8b5cf6', '#a1a1aa', '#94a3b8', '#cbd5e1', '#f87171', '#c084fc'], 
     tooltip: { 
       theme: 'dark', 
       shared: true, 
@@ -542,6 +572,12 @@ export default function NexusFolio() {
                       <ActivitySquare size={12} /> SMA {days}
                    </button>
                  ))}
+                 <button
+                    onClick={() => setShowBB(!showBB)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300 flex items-center gap-1 ${showBB ? 'bg-zinc-800 text-cyan-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'}`}
+                 >
+                    <ActivitySquare size={12} /> BB (20,2)
+                 </button>
               </div>
 
               {timeframe === 'CUSTOM' && (
@@ -706,7 +742,7 @@ export default function NexusFolio() {
                         <div key={c.ticker} className="bg-zinc-950 border border-zinc-800/80 p-3 rounded-xl flex flex-col items-center justify-center relative group min-w-[100px] flex-1 hover:border-cyan-500/30 transition-colors">
                           <span className="font-bold text-zinc-200 mt-1">{c.ticker}</span>
                           <span className="text-cyan-400 font-mono text-sm">{(c.correlation * 100).toFixed(1)}%</span>
-                          {/* BETA BADGE ADDED HERE */}
+                          {/* BETA BADGE */}
                           <span className="text-zinc-500 text-[10px] mt-0.5 px-1.5 py-0.5 bg-zinc-900 rounded-md">
                             Beta: {c.beta.toFixed(2)}
                           </span>
