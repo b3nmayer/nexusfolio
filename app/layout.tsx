@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'FolioAnalyzer',
-  description: 'Portfolio Analyzer',
+  title: 'NexusFolio',
+  description: 'Portfolio Analyzer & Correlation Terminal',
 };
 
 export default function RootLayout({
