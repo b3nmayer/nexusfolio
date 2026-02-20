@@ -5,7 +5,6 @@
 NexusFolio is a professional, Bloomberg-lite quantitative tracking dashboard built with Next.js. It goes beyond simple price tracking by calculating a true Base-100 Net Asset Value (NAV) Index for your custom portfolio, complete with dynamic timeframe syncing, technical indicators, and real-time Pearson correlation analysis.
 
 ## ✨ Key Features
-
 ### 🧠 Advanced Math Engine
 * **True NAV Indexing**: Calculates portfolio performance using Indexed NAV (starting at Base 100) with weighted daily returns.
 * **Forward-Filling**: Automatically handles missing market days or halted tickers by carrying over the last known closing price, preventing chart "cliffs".
@@ -50,6 +49,29 @@ Make sure you have [Node.js](https://nodejs.org/) (v18 or higher) installed.
 ### Installation
 
 1. Clone the repository:
-   ```bash
-   git clone [https://github.com/b3nmayer/folioanalyzer.git](https://github.com/b3nmayer/folioanalyzer.git)
-   cd folioanalyzer
+```git clone https://github.com/b3nmayer/nexusfolio.git ``` &
+```cd nexusfolio```
+
+2. Install the dependencies:
+```npm install```
+
+3. Run the development server:
+```npm run dev```
+
+4. Open http://localhost:3000 in your browser to view the terminal.
+
+### 📁 Project Structure
+/app/page.tsx: The main terminal dashboard, containing all client-side UI, state management, NAV indexing math, and charting logic.
+
+/app/api/stock/route.ts: The backend Next.js API route that securely queries the yahoo-finance2 package to fetch historical daily price data.
+
+/app/globals.css: Global Tailwind CSS imports.
+
+### 💡 Usage Guide
+Add Assets: Use the input bar to manually add a ticker (e.g., NVDA) or use the CSV upload zone.
+Adjust Weights: Drag the cyan sliders next to each ticker to adjust your target allocation. The engine recalculates the NAV instantly.
+Compare: Type a benchmark ticker like SPY into the "Compare" input box in the main control bar to overlay its performance.
+Analyze: Scroll down to the Correlation Engine to see how heavily your individual assets correlate to each other and the broader market over the selected timeframe.
+
+### 📝 License
+This project is open-source and available under the MIT License.
